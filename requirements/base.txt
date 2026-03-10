@@ -1,2 +1,3 @@
 # Base requirements
-# Added as we build
+pandas==3.0.1
+python-dotenv==1.2.2
