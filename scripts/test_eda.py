@@ -5,12 +5,26 @@ with realistic patterns: mixed numeric and categorical columns, missing values,
 and potential correlations. Runs comprehensive analysis and displays results
 in structured format.
 
-Tests:
+This script is designed to:
+1. Verify all EDA functions work correctly without errors
+2. Validate output structure and data types
+3. Demonstrate usage patterns for downstream applications
+4. Serve as integration test between dataset_loader and eda_engine
+
+Tests Performed:
 - Numeric column statistical profiling (mean, median, distribution, outliers)
 - Categorical column frequency analysis and value diversity
 - Correlation detection between numeric variables
 - Insight generation from multi-faceted analysis
 - Error handling and graceful failure modes
+- Output formatting for reporting and LLM consumption
+
+Data Characteristics:
+- 200 synthetic real estate records
+- Mixed types: numeric (price, surface, year, rooms), categorical (city, type)
+- 5-10% missing values in key columns (realistic scenario)
+- Known correlations for validation
+- Fixed random seed for reproducibility
 """
 import sys
 import os
@@ -41,6 +55,7 @@ test_data = pd.DataFrame({
 })
 
 # Introduce missing values to test data quality detection
+# This simulates real-world data imperfections
 test_data.loc[np.random.choice(n, 10), 'surface'] = np.nan  # 5% missing
 test_data.loc[np.random.choice(n, 5), 'prix'] = np.nan      # 2.5% missing
 
@@ -52,12 +67,15 @@ print(f"  Features: {', '.join(test_data.columns)}\n")
 
 # ==================== EXECUTION: Load Dataset and Run Analysis ====================
 # Step 1: Load dataset via dataset_loader (validates encoding, counts rows, profiles columns)
+print("[STEP 1] Loading dataset...")
 dataset = load_dataset('data/demos/test_eda.csv')
 
 # Step 2: Run comprehensive EDA (numeric analysis, categorical analysis, correlations, insights)
+print("[STEP 2] Running EDA analysis...")
 eda_result = run_eda(dataset)
 
 # ==================== OUTPUT: Display Analysis Results ====================
+# Display results in structured format for easy interpretation
 if eda_result['error']:
     print(f"✗ FAILED: {eda_result['error']}")
 else:

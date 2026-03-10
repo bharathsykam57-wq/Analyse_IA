@@ -52,26 +52,36 @@ def detect_encoding(file_path: str) -> str:
     which frequently uses latin-1 or iso-8859-1 encodings despite utf-8 being the
     modern standard.
 
+    The function tries encodings in priority order (utf-8 first, fastest), stopping
+    at the first successful decode. A 1KB sample is sufficient to detect encoding
+    for typical CSV files.
+
     Args:
         file_path: Absolute or relative path to the file to analyze.
 
     Returns:
         The detected encoding name (e.g., 'utf-8', 'latin-1'). Defaults to 'utf-8'
-        if no encoding can be detected.
+        if no encoding can be detected (rarely happens with well-formed files).
 
     Raises:
         No exceptions are raised; encoding detection failures log a warning and
-        default to 'utf-8'.
+        default to 'utf-8' for graceful degradation.
+
+    Examples:
+        encoding = detect_encoding('data/french_records.csv')  # Returns 'latin-1'
+        encoding = detect_encoding('data/modern_data.csv')      # Returns 'utf-8'
     """
     for encoding in SUPPORTED_ENCODINGS:
         try:
             with open(file_path, 'r', encoding=encoding) as f:
-                f.read(1024)
+                f.read(1024)  # Try reading first 1KB to detect encoding
             logger.info(f"Detected encoding: {encoding} for {Path(file_path).name}")
             return encoding
         except (UnicodeDecodeError, UnicodeError):
+            # This encoding doesn't work, try the next one
             continue
 
+    # Fallback: if no encoding works, default to utf-8 and log warning
     logger.warning(f"Could not detect encoding for {file_path}, defaulting to utf-8")
     return 'utf-8'
 
@@ -83,18 +93,23 @@ def get_column_types(df: pd.DataFrame) -> dict:
     text, or unknown. For object-type columns, attempts datetime parsing first
     before distinguishing between categorical and text.
 
-    Categorical classification uses both absolute and relative thresholds to
-    handle datasets of varying sizes: columns are categorical if they have
-    ≤20 unique values OR if (for datasets >50 rows) unique values <20% of rows.
-    This prevents small datasets from incorrectly classifying all columns as text.
+    Categorical Classification Logic:
+    Uses both absolute and relative thresholds to handle datasets of varying sizes:
+    - Columns with ≤20 unique values are categorical (e.g., gender, region)
+    - For datasets >50 rows: columns with <20% unique values are categorical
+    - This prevents small datasets from incorrectly classifying all columns as text
 
     Args:
-        df: A pandas DataFrame to analyze.
+        df: A pandas DataFrame to analyze. Works with any size or column types.
 
     Returns:
         A dictionary with keys 'numeric', 'categorical', 'datetime', 'text',
         and 'unknown', each mapping to a list of column names belonging to
         that type.
+
+    Examples:
+        Input columns: [price (150000-500000), city (Paris, Lyon, Mars), birth_date]
+        Output: numeric=[price], categorical=[city], datetime=[birth_date]
     """
     column_types = {
         'numeric': [],
@@ -153,8 +168,15 @@ def get_basic_stats(df: pd.DataFrame) -> dict:
     and duplicate row detection. This metadata is computed for every loaded
     dataset to support data quality assessment and downstream processing.
 
+    Statistics Computed:
+    - Basic dimensions: row and column counts
+    - Column names: list of all column identifiers
+    - Missing value analysis: both absolute counts and percentages per column
+    - Memory footprint: total memory usage in MB (using deep analysis)
+    - Data quality: count of completely duplicate rows
+
     Args:
-        df: A pandas DataFrame to profile.
+        df: A pandas DataFrame to profile. Works with any size.
 
     Returns:
         A dictionary containing:
@@ -165,14 +187,25 @@ def get_basic_stats(df: pd.DataFrame) -> dict:
         - 'missing_percentage': Percentage of missing values per column (rounded to 2 decimals)
         - 'memory_usage_mb': Total memory usage in megabytes
         - 'duplicate_rows': Count of completely duplicate rows
+
+    Examples:
+        Input: 1000 x 10 DataFrame with 50 NaN values
+        Output: {'rows': 1000, 'columns': 10, 'memory_usage_mb': 0.08, ...}
     """
+    # Calculate missing values for each column
+    missing_counts = df.isnull().sum()
+    total_rows = len(df)
+    
     stats = {
-        'rows': len(df),
+        'rows': total_rows,
         'columns': len(df.columns),
         'column_names': list(df.columns),
-        'missing_values': df.isnull().sum().to_dict(),
-        'missing_percentage': (df.isnull().sum() / len(df) * 100).round(2).to_dict(),
+        'missing_values': missing_counts.to_dict(),
+        # Calculate percentage and round to 2 decimals for readability
+        'missing_percentage': (missing_counts / total_rows * 100).round(2).to_dict(),
+        # Use deep=True to include object dtype sizes accurately
         'memory_usage_mb': round(df.memory_usage(deep=True).sum() / 1024 / 1024, 2),
+        # Count rows that are complete duplicates of another row
         'duplicate_rows': int(df.duplicated().sum())
     }
     return stats
@@ -243,17 +276,20 @@ def load_dataset(file_path: str) -> dict:
         return result
 
     try:
-        # Detect the file's character encoding to handle various data sources correctly.
+        # STEP 1: Detect the file's character encoding to handle various data sources correctly.
+        # This is critical for French government data which often uses latin-1
         encoding = detect_encoding(file_path)
         result['encoding'] = encoding
 
-        # Count total rows first without loading entire file to determine loading strategy.
+        # STEP 2: Count total rows first without loading entire file to determine loading strategy.
+        # This allows for intelligent decision-making about memory usage
         # Subtract 1 from line count to exclude the header row.
         with open(file_path, 'r', encoding=encoding) as f:
             row_count = sum(1 for _ in f) - 1
 
         logger.info(f"File has {row_count:,} rows: {Path(file_path).name}")
 
+        # STEP 3: Load dataset with appropriate strategy based on size
         # Load full dataset if it fits within memory constraints (≤100,000 rows).
         if row_count <= MAX_ROWS_FULL_LOAD:
             df = pd.read_csv(file_path, encoding=encoding)
@@ -261,7 +297,8 @@ def load_dataset(file_path: str) -> dict:
             logger.info(f"Loaded full dataset: {row_count:,} rows")
         else:
             # For large datasets, load only the first chunk for inspection and metadata.
-            # The full dataset can be processed later using chunked iteration.
+            # The full dataset can be processed later using chunked iteration if needed
+            # This prevents memory exhaustion while still providing data structure info
             df = pd.read_csv(file_path, encoding=encoding, nrows=MAX_ROWS_FULL_LOAD)
             result['truncated'] = True
             logger.warning(
@@ -270,7 +307,8 @@ def load_dataset(file_path: str) -> dict:
                 f"Full analysis will use chunked processing."
             )
 
-        # Populate result dictionary with dataframe and derived metadata.
+        # STEP 4: Populate result dictionary with dataframe and derived metadata.
+        # This includes statistics, column type classification, and file metadata
         result['dataframe'] = df
         result['stats'] = get_basic_stats(df)
         result['column_types'] = get_column_types(df)
@@ -286,6 +324,7 @@ def load_dataset(file_path: str) -> dict:
 
     except pd.errors.EmptyDataError:
         # Pandas raised EmptyDataError, indicating CSV has headers but no data rows.
+        # This catches files that parse as valid CSV but have no content rows
         error_msg = f"CSV file has no data: {file_path}"
         logger.error(error_msg)
         result['error'] = error_msg
@@ -293,6 +332,7 @@ def load_dataset(file_path: str) -> dict:
 
     except pd.errors.ParserError as e:
         # Pandas encountered malformed CSV content (e.g., mismatched delimiters, bad encoding).
+        # This catches structural CSV problems
         error_msg = f"CSV parsing error: {str(e)}"
         logger.error(error_msg)
         result['error'] = error_msg
@@ -300,6 +340,7 @@ def load_dataset(file_path: str) -> dict:
 
     except Exception as e:
         # Capture any unexpected errors to ensure function never fails silently.
+        # This provides graceful error handling for edge cases
         error_msg = f"Unexpected error loading {file_path}: {str(e)}"
         logger.error(error_msg)
         result['error'] = error_msg
