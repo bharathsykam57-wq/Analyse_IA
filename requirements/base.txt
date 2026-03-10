@@ -1,5 +1,16 @@
-# Base requirements
-pandas==3.0.1
+# Core
 python-dotenv==1.2.2
+
+# Data
+numpy==1.26.4
+pandas==2.1.4
+scipy==1.11.4
+
+# Visualisation
 plotly==6.6.0
-scipy==1.17.1
+
+# ML
+pycaret==3.3.2
+scikit-learn==1.4.2
+lightgbm==4.6.0
+pyod==2.0.7
