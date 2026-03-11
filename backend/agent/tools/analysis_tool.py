@@ -302,12 +302,13 @@ def run_analysis(dataset_path: str, target_column: str = None) -> dict:
     logger.info("Stage 4/5: Running anomaly detection")
     try:
         anomaly_result = detect_anomalies(load_result)
+        severity = anomaly_result.get("severity_counts", {})
         anomalies = {
-            "total": anomaly_result.get("total_anomalies", 0),
-            "percentage": anomaly_result.get("anomaly_percentage", 0),
-            "high": anomaly_result.get("high_severity", 0),
-            "medium": anomaly_result.get("medium_severity", 0),
-            "low": anomaly_result.get("low_severity", 0),
+            "total": anomaly_result.get("anomaly_count", 0),
+            "percentage": anomaly_result.get("anomaly_rate", 0),
+            "high": severity.get("high", 0),
+            "medium": severity.get("medium", 0),
+            "low": severity.get("low", 0),
         }
         logger.info(f"✓ Detected {anomalies['total']} anomalies ({anomalies['percentage']:.2f}%)")
     except Exception as e:
