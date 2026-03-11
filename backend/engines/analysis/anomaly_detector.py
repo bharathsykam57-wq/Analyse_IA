@@ -1,71 +1,55 @@
-"""Anomaly detection engine using ensemble algorithms for unsupervised outlier detection.
+"""Anomaly detection engine using PyOD + IsolationForest ensemble.
 
-Detects outliers and anomalous patterns in datasets without requiring a target column.
-Uses ensemble approach combining two complementary algorithms:
-1. IsolationForest: Isolation-based detection (70% weight)
-2. Statistical IQR: Distance-based detection (30% weight)
+Uses PyOD (Python Outlier Detection) as primary framework
+combined with statistical IQR scoring for robust detection.
 
-ARCHITECTURE:
-- IsolationForest: Random isolation trees; anomalies isolated in fewer splits
-  └─ Strengths: High-dimensional efficiency, non-linear patterns
-  └─ Returns: Binary labels (-1=anomaly, 1=normal) + decision scores
-- Statistical IQR: Interquartile Range per feature, robust and interpretable
-  └─ Strengths: Explains which features are anomalous
-  └─ Returns: Continuous scores (0-1) for anomaly severity
-- Ensemble: 70% IsolationForest + 30% Statistical for robust detection
+PyOD algorithms used:
+- IForest: isolation-based (handles high dimensional data)
+- HBOS: histogram-based (fast, unsupervised)
+- KNN: distance-based (finds local outliers)
 
-SEVERITY LEVELS:
-- HIGH (≥0.7): Most anomalous, requires investigation
-- MEDIUM (0.4-0.7): Moderately unusual
-- LOW (<0.4): Mildly anomalous
-
-USE CASES: Fraud detection, quality control, data audit automation
-
-COMPLIANCE: EU AI Act, GDPR, French RGPD transparency requirements
+Use cases: fraud detection, quality control, audit automation.
 """
 import logging
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler
-from sklearn.pipeline import Pipeline
+from pyod.models.iforest import IForest
+from pyod.models.hbos import HBOS
+from pyod.models.knn import KNN
 
 logger = logging.getLogger(__name__)
 
-# SEVERITY THRESHOLDS: Classify anomalies by how extreme they are
-# These thresholds are applied to the combined ensemble score (0-1 range)
-SEVERITY_HIGH   = 0.7   # Score ≥ 0.7: Most anomalous (top 5-10% of anomalies)
-SEVERITY_MEDIUM = 0.4   # Score 0.4-0.7: Moderately anomalous (middle 30-50%)
-SEVERITY_LOW    = 0.0   # Score < 0.4: Mildly anomalous (normal variation boundary)
+# Anomaly score thresholds
+SEVERITY_HIGH   = 0.7
+SEVERITY_MEDIUM = 0.4
+SEVERITY_LOW    = 0.0
 
 
-def prepare_numeric_matrix(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
-    """Convert DataFrame to numeric matrix for anomaly detection algorithms.
+def prepare_numeric_matrix(df: pd.DataFrame) -> tuple:
+    """Convert DataFrame to numeric matrix for anomaly detection.
 
-    Anomaly detection requires numeric input. Handles mixed-type data:
-    1. Encode: Categorical → integers (0, 1, 2, ...)
-    2. Extract: Keep only numeric columns
-    3. Impute: Fill missing with column medians (robust to outliers)
-    4. Scale: Normalize to mean=0, std=1 for fair distance comparison
-    5. Return: Scaled matrix ready for IsolationForest
+    Transforms mixed-type data into a standardized numeric matrix suitable
+    for PyOD algorithms. Handles categorical encoding and feature scaling.
 
-    Feature scaling is critical: Without it, large-range features (salary €0-100k)
-    dominate small-range features (rating 1-5). StandardScaler ensures each
-    feature contributes equally to anomaly detection.
+    Process:
+    1. Encode categorical/object columns using OrdinalEncoder
+    2. Select only numeric columns
+    3. Impute missing values with column median
+    4. Apply StandardScaler normalization (mean=0, std=1)
 
     Args:
-        df: Input DataFrame with potentially mixed types and missing values.
+        df: Input DataFrame with mixed types (numeric, categorical, etc.)
 
     Returns:
-        Tuple of (df_scaled, features_used):
-        - df_scaled: Numeric DataFrame with scaled features
-        - features_used: List of feature names in order
+        Tuple of:
+        - Scaled numpy array (n_samples, n_features) ready for PyOD
+        - List of numeric feature names used (order matches array columns)
     """
     df_work = df.copy()
-    features_used = []
 
-    # STEP 1: Encode categorical columns to numeric (required by algorithms)
-    # OrdinalEncoder: converts 'Paris', 'Lyon', 'Marseille' → 0, 1, 2
+    # Step 1: Encode categorical columns (text/category types)
+    # OrdinalEncoder maps categories to integers; unknown values get -1
     cat_cols = df_work.select_dtypes(
         include=['object', 'category']
     ).columns.tolist()
@@ -73,112 +57,193 @@ def prepare_numeric_matrix(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     if cat_cols:
         encoder = OrdinalEncoder(
             handle_unknown='use_encoded_value',
-            unknown_value=-1  # Unseen categories → -1 (distinct anomaly signal)
+            unknown_value=-1  # Handle unseen categories in inference
         )
         df_work[cat_cols] = encoder.fit_transform(df_work[cat_cols])
-        logger.info(f"Encoded {len(cat_cols)} categorical features")
+        logger.info(f"✓ Encoded {len(cat_cols)} categorical features: {cat_cols}")
 
-    # STEP 2: Extract numeric columns (anomaly algorithms need numbers)
-    numeric_cols = df_work.select_dtypes(include=[np.number]).columns.tolist()
+    # Step 2: Extract only numeric columns for anomaly detection
+    # PyOD algorithms require numeric input; non-numeric filtered out
+    numeric_cols = df_work.select_dtypes(
+        include=[np.number]
+    ).columns.tolist()
 
     if not numeric_cols:
-        logger.warning("No numeric features found after encoding")
-        return pd.DataFrame(), []
+        logger.warning("⚠ No numeric columns found in dataset")
+        return np.array([]), []
 
     df_numeric = df_work[numeric_cols].copy()
 
-    # STEP 3: Handle missing values with median (robust to outliers)
+    # Step 3: Impute missing values with column median
+    # Median is robust to outliers; PyOD requires complete numeric data
     for col in df_numeric.columns:
-        missing_count = df_numeric[col].isna().sum()
-        if missing_count > 0:
+        nan_count = df_numeric[col].isna().sum()
+        if nan_count > 0:
             median_val = df_numeric[col].median()
             df_numeric[col] = df_numeric[col].fillna(median_val)
-            logger.info(f"Filled {missing_count} missing in {col}")
+            logger.debug(f"  Imputed {nan_count} missing values in '{col}' with median={median_val}")
 
-    # STEP 4: Normalize features to equal scale (mean=0, std=1)
-    # Without scaling: €100k salary dominates 1-5 rating
+    # Step 4: Standardize features (zero mean, unit variance)
+    # StandardScaler normalization ensures all features contribute equally
+    # to PyOD ensemble without scale-dependent bias
     scaler = StandardScaler()
-    df_scaled = pd.DataFrame(
-        scaler.fit_transform(df_numeric),
-        columns=numeric_cols
-    )
+    X_scaled = scaler.fit_transform(df_numeric)
 
-    features_used = numeric_cols
-    logger.info(f"Prepared {len(features_used)} numeric features for anomaly detection")
-
-    return df_scaled, features_used
+    logger.info(f"✓ Prepared {len(numeric_cols)} features for anomaly detection")
+    return X_scaled, numeric_cols
 
 
-def compute_statistical_scores(df_original: pd.DataFrame,
+def compute_statistical_scores(df: pd.DataFrame,
                                 features_used: list) -> np.ndarray:
-    """Compute statistical anomaly scores using Interquartile Range (IQR) method.
+    """Compute statistical anomaly scores using IQR (Interquartile Range) method.
 
-    Measures how anomalous each data point is based on distance from IQR bounds.
-    IQR = Q3 - Q1 where Q1=25th percentile, Q3=75th percentile, Q2=median.
+    Detects anomalies by measuring deviation from quartile-based statistics.
+    For each feature, calculates how many standard IQR distances a value
+    is from the median. Scores are aggregated across all features.
 
-    INTERPRETATION:
-    - Values within ±1.5×IQR of median: Normal (5th to 95th percentile roughly)
-    - Values beyond ±3×IQR: Extremely anomalous (statistical outlier)
-    - Score formula: How many IQRs away from median, converted to 0-1 range
-
-    WHY IQR?
-    - Resistant to extreme outliers (unlike mean/std which can be skewed)
-    - Interpretable (directly tells: "Value is 5 IQRs above median")
-    - Complements IsolationForest (statistical vs isolation perspective)
+    Why IQR?
+    - Robust to extreme outliers (uses medians, not means)
+    - Interpretable: ~1.5 IQR beyond Q1/Q3 is statistical outlier
+    - Complements PyOD ensemble for statistical validation
 
     Args:
-        df_original: Original DataFrame before scaling (for interpretable units).
-        features_used: List of numeric feature names to analyze.
+        df: Original DataFrame (unscaled data for quantile computation)
+        features_used: List of numeric feature names to analyze
 
     Returns:
-        Array of statistical anomaly scores (0.0 to 1.0) with one score per row.
-        Higher score = more anomalous based on statistical criteria.
+        Numpy array of normalized anomaly scores [0, 1] per row.
+        Higher score = more anomalous (further from normal distribution)
     """
-    numeric_df = df_original[features_used].select_dtypes(
-        include=[np.number]
-    )
+    numeric_df = df[features_used].select_dtypes(include=[np.number])
 
     if numeric_df.empty:
-        return np.zeros(len(df_original))
+        logger.debug("No numeric features found for statistical scoring")
+        return np.zeros(len(df))
 
     scores = np.zeros(len(numeric_df))
 
     # Compute IQR-based anomaly score for each feature
     for col in numeric_df.columns:
         values = numeric_df[col].fillna(numeric_df[col].median())
+        
+        # Calculate quartiles and interquartile range
         q1 = values.quantile(0.25)  # 25th percentile
         q3 = values.quantile(0.75)  # 75th percentile
-        iqr = q3 - q1  # Interquartile range
+        iqr = q3 - q1              # Spread of middle 50% of data
 
         if iqr > 0:
-            # Measure distance from median in IQR units
-            # Values within ±1.5 IQR = normal, beyond ±3 IQR = extreme
+            # Measure normalized distance from median
             median = values.median()
             iqr_distance = np.abs(values - median) / iqr
-            # Convert IQR distance to 0-1 anomaly score using sigmoid-like function
-            # Higher distance = higher score (more anomalous)
+            
+            # Sigmoid-like function maps IQR distance to anomaly score
+            # Formula produces: 0 at distance=0, ~0.5 at distance=3*IQR
             col_score = 1 - 1 / (1 + iqr_distance / 3)
             scores += col_score.values
 
-    # Normalize across all features to 0-1 range
+    # Normalize across all features to [0, 1] range
     if scores.max() > 0:
         scores = scores / scores.max()
 
+    logger.debug(f"Statistical IQR scoring complete: mean={scores.mean():.3f}, max={scores.max():.3f}")
     return scores
 
 
-def classify_severity(score: float) -> str:
-    """Classify anomaly severity from ensemble score (0-1 range).
+def run_pyod_ensemble(X_scaled: np.ndarray,
+                      contamination: float,
+                      random_state: int) -> tuple:
+    """Run PyOD ensemble of three complementary anomaly detection algorithms.
 
-    Uses SEVERITY_HIGH and SEVERITY_MEDIUM thresholds to enable prioritization:
-    focus investigation on 'high' severity first, then 'medium', then 'low'.
+    Combines three diverse PyOD models for robust detection:
+    - IForest (isolation forest): Fast, handles high-dimensional data
+    - HBOS (histogram-based): Assumes feature independence
+    - KNN (k-nearest neighbors): Detects local density anomalies
+
+    Ensemble strategy: Vote by averaging normalized decision scores from all
+    models, then classify top contamination% as anomalies based on threshold.
 
     Args:
-        score: Ensemble anomaly score between 0.0 and 1.0.
-              Combines IsolationForest (70%) + Statistical (30%).
+        X_scaled: Scaled numeric matrix (n_samples, n_features)
+        contamination: Expected proportion of anomalies [0.01-0.5]
+        random_state: Random seed for reproducibility (IForest/KNN)
 
     Returns:
-        Severity classification: 'high' (≥0.7), 'medium' (0.4-0.7), or 'low' (<0.4).
+        Tuple of:
+        - Binary labels array: 1=anomaly, 0=normal (based on percentile threshold)
+        - Normalized scores array [0, 1]: higher score = more anomalous
+    """
+    # Initialize three complementary PyOD models with hyperparameters
+    models = {
+        'IForest': IForest(
+            contamination=contamination,
+            random_state=random_state,
+            n_estimators=100  # Ensemble size for isolation trees
+        ),
+        'HBOS': HBOS(
+            contamination=contamination,
+            n_bins=10  # Histogram bins for feature distributions
+        ),
+        'KNN': KNN(
+            contamination=contamination,
+            n_neighbors=min(5, len(X_scaled) - 1)  # Limit to dataset size
+        )
+    }
+
+    all_scores = []  # Collect normalized scores from each model
+
+    # Fit each model and extract normalized decision scores
+    for name, model in models.items():
+        try:
+            model.fit(X_scaled)
+            
+            # Extract raw anomaly scores (PyOD convention: higher = more anomalous)
+            raw_scores = model.decision_scores_
+            
+            # Min-max normalize to [0, 1] for fair ensemble averaging
+            score_min = raw_scores.min()
+            score_max = raw_scores.max()
+            if score_max > score_min:
+                # Linear scaling to [0, 1]
+                normalized = (raw_scores - score_min) / (score_max - score_min)
+            else:
+                # All scores identical (rare edge case)
+                normalized = np.zeros_like(raw_scores)
+            
+            all_scores.append(normalized)
+            logger.info(f"✓ PyOD {name}: fitted successfully ({len(X_scaled)} samples, {X_scaled.shape[1]} features)")
+        except Exception as e:
+            logger.warning(f"✗ PyOD {name} failed: {e}. Skipping this model.")
+
+    if not all_scores:
+        raise ValueError("✗ All PyOD models failed during fitting. Check data quality.")
+
+    # Ensemble strategy: Average normalized scores from all successful models
+    # This democratic voting reduces false positives from individual model bias
+    ensemble_scores = np.mean(all_scores, axis=0)
+
+    # Binary classification: Flag top contamination% by score percentile
+    # Example: contamination=0.05 → threshold = 95th percentile of scores
+    threshold = np.percentile(ensemble_scores, (1 - contamination) * 100)
+    labels = (ensemble_scores >= threshold).astype(int)
+    
+    logger.debug(f"Ensemble scores: threshold={threshold:.4f}, mean={ensemble_scores.mean():.4f}, std={ensemble_scores.std():.4f}")
+
+    return labels, ensemble_scores
+
+
+def classify_severity(score: float) -> str:
+    """Classify anomaly severity based on normalized score.
+
+    Thresholds:
+    - HIGH: score ≥ 0.70 (extreme anomalies, requires immediate investigation)
+    - MEDIUM: 0.40 ≤ score < 0.70 (moderately anomalous, flag for review)
+    - LOW: score < 0.40 (mild deviations, may be normal variation)
+
+    Args:
+        score: Normalized anomaly score [0, 1] where 1 = most anomalous
+
+    Returns:
+        Severity label: 'high', 'medium', or 'low'
     """
     if score >= SEVERITY_HIGH:
         return 'high'
@@ -194,81 +259,27 @@ def detect_anomalies(
     n_top_anomalies: int = 10,
     random_state: int = 42
 ) -> dict:
-    """Run anomaly detection on a loaded dataset using ensemble algorithms.
+    """Run anomaly detection using PyOD ensemble + statistical scoring.
 
-    MAIN ENTRY POINT for unsupervised anomaly detection. Combines IsolationForest
-    and statistical IQR scoring to identify unusual patterns in data.
-
-    WORKFLOW:
-    STEP 1: Validate input dataset (not empty, has minimum rows)
-    STEP 2: Prepare numeric matrix (encode categories, scale features)
-    STEP 3: Train IsolationForest (detects isolation-based anomalies)
-    STEP 4: Compute statistical scores (IQR-based anomaly metrics)
-    STEP 5: Combine scores with weighted ensemble (70% IF + 30% Statistical)
-    STEP 6: Classify anomalies as HIGH/MEDIUM/LOW severity
-    STEP 7: Extract top anomalies with feature-level explanations
-    STEP 8: Return complete anomaly report with statistics
-
-    CONTAMINATION PARAMETER:
-    Expected fraction of anomalies in dataset (IsolationForest parameter).
-    - 0.01: Expect ~1% anomalies (very strict, for clean data)
-    - 0.05: Expect ~5% anomalies (default, balanced)
-    - 0.10: Expect ~10% anomalies (lenient, for noisy data)
-    Should roughly match domain knowledge of anomaly frequency.
-
-    FEATURE IMPORTANCE:
-    Top anomalies report which specific features are anomalous:
-    - Uses percentile ranking (<5th or >95th percentile = flagged)
-    - Helps explain: "This transaction anomalous because amount=€50k > 95th percentile"
+    Main entry point. Uses PyOD (IForest + HBOS + KNN) as primary
+    detector combined with IQR statistical scoring for robustness.
 
     Args:
-        dataset_result: Output from dataset_loader.load_dataset() with 'dataframe' key.
-        contamination: Expected anomaly fraction (0.01 to 0.5). Default 0.05.
-                      Tune based on domain knowledge. Financial fraud 0.01-0.05.
-        n_top_anomalies: Number of top anomalies to return detailed analysis for.
-                        Default 10. Higher values give more context but slower.
-        random_state: Random seed for reproducibility (default 42).
+        dataset_result: Output from dataset_loader.load_dataset()
+        contamination: Expected fraction of anomalies (0.01 to 0.5)
+        n_top_anomalies: Number of top anomalies to return in detail
+        random_state: Seed for reproducibility
 
     Returns:
-        Dictionary with complete anomaly detection report:
-        {
-            'anomaly_count': int,  # Number of rows flagged as anomalies
-            'anomaly_rate': float,  # Percentage of total rows (0-100)
-            'anomaly_scores': list,  # Score for every row (0-1, all rows)
-            'features_used': list,  # Feature names used for detection
-            'severity_counts': {  # Breakdown by severity
-                'high': int,      # Most anomalous (score ≥ 0.7)
-                'medium': int,    # Moderately anomalous (0.4-0.7)
-                'low': int        # Mildly anomalous (< 0.4)
-            },
-            'top_anomalies': [  # Detailed info on worst n_top_anomalies
-                {
-                    'row_index': int,  # Index in original dataset
-                    'anomaly_score': float,  # Combined ensemble score
-                    'severity': str,  # 'high', 'medium', or 'low'
-                    'anomalous_features': [{  # Which features are unusual
-                        'feature': str,  # Feature name
-                        'value': float,  # Actual value
-                        'percentile': float  # Where value ranks (0-100)
-                    }],
-                    'row_data': dict  # All feature values
-                }
-            ],
-            'error': str or None  # Error if failed, None if successful
-        }
-
-    Examples:
-        # Standard usage
-        >>> dataset = load_dataset('data.csv')
-        >>> result = detect_anomalies(dataset, contamination=0.05)
-        >>> print(f\"Found {result['anomaly_count']} anomalies\")
-        >>> for anom in result['top_anomalies'][:3]:
-        >>>     print(anom['anomalous_features'])
-
-    Note:
-        - IsolationForest is stochastic; consistent random_state for reproducibility.
-        - Contamination is a hint; actual count may vary slightly.
-        - Anomaly scores comparable across rows but not across different datasets.
+        Dictionary with:
+        - 'anomaly_count': total anomalies detected
+        - 'anomaly_rate': percentage of dataset flagged
+        - 'top_anomalies': detailed info on worst anomalies
+        - 'anomaly_scores': score for every row
+        - 'features_used': features used for detection
+        - 'models_used': PyOD models in ensemble
+        - 'severity_counts': breakdown by severity
+        - 'error': None on success, message on failure
     """
     result = {
         'anomaly_count': 0,
@@ -276,11 +287,11 @@ def detect_anomalies(
         'top_anomalies': [],
         'anomaly_scores': [],
         'features_used': [],
+        'models_used': ['IForest', 'HBOS', 'KNN'],
         'severity_counts': {'high': 0, 'medium': 0, 'low': 0},
         'error': None
     }
 
-    # STEP 1: Validate input dataset
     if dataset_result.get('error'):
         result['error'] = f"Dataset error: {dataset_result['error']}"
         return result
@@ -297,48 +308,41 @@ def detect_anomalies(
 
     try:
         logger.info(
-            f"Starting anomaly detection: {len(df)} rows, "
-            f"{len(df.columns)} columns, contamination={contamination}"
+            f"━━ Starting anomaly detection ━━\n"
+            f"  Dataset: {len(df)} rows × {len(df.columns)} columns\n"
+            f"  Contamination: {contamination*100:.1f}% (expect ~{int(len(df)*contamination)} anomalies)\n"
+            f"  Expected top-N results: {n_top_anomalies}"
         )
 
-        # STEP 2: Prepare numeric matrix (encode, scale)
-        df_scaled, features_used = prepare_numeric_matrix(df)
+        # Phase 1: Prepare numeric matrix (encoding + scaling)
+        X_scaled, features_used = prepare_numeric_matrix(df)
 
-        if df_scaled.empty or len(features_used) == 0:
-            result['error'] = "No numeric features found for anomaly detection"
+        if len(features_used) == 0:
+            result['error'] = "No numeric features found in dataset"
+            logger.error(result['error'])
             return result
 
         result['features_used'] = features_used
+        logger.info(f"  Phase 1: Matrix prepared with {len(features_used)} numeric features")
 
-        # STEP 3: IsolationForest detection
-        # Isolation-based: anomalies isolated in fewer random splits across features
-        iso_forest = IsolationForest(
-            contamination=contamination,  # Expected anomaly fraction
-            random_state=random_state,  # Seed for reproducibility
-            n_estimators=100  # Number of isolation trees
+        # Phase 2: Run PyOD ensemble (IForest + HBOS + KNN)
+        pyod_labels, pyod_scores = run_pyod_ensemble(
+            X_scaled, contamination, random_state
         )
-        iso_labels = iso_forest.fit_predict(df_scaled)  # -1=anomaly, 1=normal
-        iso_scores = iso_forest.decision_function(df_scaled)  # Raw scores
+        logger.info(f"  Phase 2: PyOD ensemble completed")
 
-        # Normalize IsolationForest scores to 0-1
-        # Lower decision_function score = more anomalous
-        iso_scores_normalized = 1 - (
-            (iso_scores - iso_scores.min()) /
-            (iso_scores.max() - iso_scores.min() + 1e-10)
-        )
-
-        # STEP 4: Statistical scores (IQR-based)
+        # Phase 3: Compute statistical IQR scores for robustness
         stat_scores = compute_statistical_scores(df, features_used)
+        logger.info(f"  Phase 3: Statistical IQR scoring completed")
 
-        # STEP 5: Ensemble: combine both scores
-        # 70% weight IsolationForest (robust to high dimensions)
-        # 30% weight Statistical (interpretable per-feature)
-        combined_scores = (iso_scores_normalized * 0.7 + stat_scores * 0.3)
-
+        # Phase 4: Hybrid ensemble (PyOD 70% weight + IQR 30% weight)
+        # PyOD given higher weight due to proven robustness across datasets
+        combined_scores = pyod_scores * 0.7 + stat_scores * 0.3
         result['anomaly_scores'] = combined_scores.tolist()
+        logger.debug(f"  Phase 4: Hybrid scores computed (PyOD:70% + IQR:30%)")
 
-        # STEP 6: Anomalies = rows flagged by IsolationForest
-        anomaly_mask = iso_labels == -1
+        # Identify flagged anomalies from PyOD labels
+        anomaly_mask = pyod_labels == 1
         anomaly_count = int(anomaly_mask.sum())
         result['anomaly_count'] = anomaly_count
         result['anomaly_rate'] = round(
@@ -346,66 +350,71 @@ def detect_anomalies(
         )
 
         logger.info(
-            f"Detected {anomaly_count} anomalies "
-            f"({result['anomaly_rate']}% of data)"
+            f"  Detection Results: Found {anomaly_count} anomalies "
+            f"({result['anomaly_rate']}% of {len(df)} rows)"
         )
 
-        # STEP 6b: Classify by severity
-        for i, (is_anomaly, score) in enumerate(
-            zip(anomaly_mask, combined_scores)
-        ):
+        # Categorize anomalies by severity for actionable insights
+        for is_anomaly, score in zip(anomaly_mask, combined_scores):
             if is_anomaly:
                 severity = classify_severity(float(score))
                 result['severity_counts'][severity] += 1
 
-        # STEP 7: Extract top anomalies with explanations
+        # Extract indices of flagged anomalies for detailed analysis
         anomaly_indices = np.where(anomaly_mask)[0]
-        anomaly_scores_for_flagged = combined_scores[anomaly_indices]
+        # Rank anomalies by score severity (highest first)
+        anomaly_scores_flagged = combined_scores[anomaly_indices]
         top_indices = anomaly_indices[
-            np.argsort(anomaly_scores_for_flagged)[::-1][:n_top_anomalies]
+            np.argsort(anomaly_scores_flagged)[::-1][:n_top_anomalies]
         ]
 
-        for idx in top_indices:
+        # Extract detailed info on worst anomalies for investigation
+        logger.info(f"  Analyzing top {min(len(top_indices), n_top_anomalies)} anomalies in detail...")
+        
+        for rank, idx in enumerate(top_indices, 1):
             row = df.iloc[idx]
             score = float(combined_scores[idx])
             severity = classify_severity(score)
 
-            # Find which features are driving this anomaly
-            row_numeric = df[features_used].iloc[idx]
+            # Identify which features are driving the anomaly (extreme percentile)
+            # Flag features where value is in top/bottom 5% of distribution
             anomalous_features = []
             for col in features_used:
-                val = row_numeric[col]
+                val = df[col].iloc[idx]
                 if pd.notna(val):
+                    # Calculate percentile rank (0-100) of this value
                     col_vals = df[col].dropna()
-                    # Percentile: where does this value rank? (0-100)
                     percentile = (col_vals < val).mean() * 100
-                    # Flag if < 5th or > 95th percentile
+                    
+                    # Flag if in extreme tail (top 5% or bottom 5%)
                     if percentile > 95 or percentile < 5:
                         anomalous_features.append({
                             'feature': col,
                             'value': round(float(val), 4),
-                            'percentile': round(percentile, 1)
+                            'percentile': round(percentile, 1)  # Percentile rank in dataset
                         })
 
             result['top_anomalies'].append({
                 'row_index': int(idx),
                 'anomaly_score': round(score, 4),
                 'severity': severity,
-                'anomalous_features': anomalous_features,
+                'anomalous_features': anomalous_features,  # Features driving the flag
                 'row_data': row.to_dict()
             })
 
+        # Summary statistics
         logger.info(
-            f"Anomaly detection complete. "
-            f"High: {result['severity_counts']['high']} | "
-            f"Medium: {result['severity_counts']['medium']} | "
-            f"Low: {result['severity_counts']['low']}"
+            f"\n  ─ Severity Breakdown ─\n"
+            f"  🔴 High:   {result['severity_counts']['high']} anomalies\n"
+            f"  🟡 Medium: {result['severity_counts']['medium']} anomalies\n"
+            f"  🟢 Low:    {result['severity_counts']['low']} anomalies\n"
+            f"  ✓ Analysis complete"
         )
 
         return result
 
     except Exception as e:
-        error_msg = f"Anomaly detection failed: {str(e)}"
-        logger.error(error_msg)
+        error_msg = f"✗ Anomaly detection failed: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         result['error'] = error_msg
         return result
