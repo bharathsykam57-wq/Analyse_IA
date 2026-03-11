@@ -76,13 +76,14 @@ class AgentState(TypedDict):
 
     task_type (Optional[str]):
         Detected task category for routing to appropriate tool.
-        - Possible values: 'analysis' (CSV/data), 'rag' (PDF documents), 'unknown'
+        - Possible values: 'analysis' (CSV/data), 'code' (code execution), 'rag' (PDF documents), 'unknown'
         - Set by: Classifier node based on question content
         - Default: None initially, set before execution
-        - Routing: Determines which tool node executes (Analysis vs. RAG)
+        - Routing: Determines which tool node executes (Analysis vs. Code vs. RAG)
         - Fallback: If 'unknown', return helpful message without execution
         - Example conditions:
           - 'analysis': Question mentions "dataset", "analyze", "detect", "column"
+          - 'code': Question mentions "execute", "script", "generate", "plot", "calculate"
           - 'rag': Question mentions "CNIL", "regulation", "compliance", "document"
           - 'unknown': Unclear intent or ambiguous request
 

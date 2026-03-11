@@ -252,9 +252,17 @@ def classify_task(state: AgentState) -> AgentState:
         "protection", "données personnelles", "open source", "ia"
     ]
 
+    # Keywords indicating Phase 3 CODE: Code execution, scripting, programming
+    code_keywords = [
+        "exécute", "exécuter", "calcule", "calculer", "génère", "générer",
+        "script", "code", "programme", "python", "plot", "graphique",
+        "visualise", "visualiser", "simule", "simuler"
+    ]
+
     # Count keyword matches in question (each match = +1 point)
     analysis_score = sum(1 for kw in analysis_keywords if kw in question_lower)
     rag_score = sum(1 for kw in rag_keywords if kw in question_lower)
+    code_score = sum(1 for kw in code_keywords if kw in question_lower)
 
     # CONFIDENCE CALCULATION: Based on keyword match strength
     # Strong match: 5+ keywords from leading category → confidence 0.95
@@ -274,26 +282,28 @@ def classify_task(state: AgentState) -> AgentState:
             return 0.60
 
     # Decision logic: if one category clearly leads, use that category
-    if analysis_score > rag_score and analysis_score > 0:
-        # Analysis has more keyword hits → use ANALYSIS
-        task_type = "analysis"
-        confidence_score = calculate_confidence(analysis_score, rag_score)
-        logger.debug(f"Keyword match: ANALYSIS ({analysis_score} hits, conf={confidence_score:.2f})")
-    elif rag_score > analysis_score and rag_score > 0:
-        # RAG has more keyword hits → use RAG
-        task_type = "rag"
-        confidence_score = calculate_confidence(rag_score, analysis_score)
-        logger.debug(f"Keyword match: RAG ({rag_score} hits, conf={confidence_score:.2f})")
+    scores = {"analysis": analysis_score, "rag": rag_score, "code": code_score}
+    leading = max(scores, key=scores.get)
+
+    # Check if leader has a clear lead (single unique maximum)
+    if scores[leading] > 0 and list(scores.values()).count(scores[leading]) == 1:
+        # One category has a clear lead
+        task_type = leading
+        # Get second-highest score for confidence calculation
+        other_scores = [s for k, s in scores.items() if k != leading]
+        trailing_score = max(other_scores) if other_scores else 0
+        confidence_score = calculate_confidence(scores[leading], trailing_score)
+        logger.debug(f"Keyword match: {task_type.upper()} ({scores[leading]} hits, conf={confidence_score:.2f})")
     else:
         # ═══════════════════════════════════════════════════════════════════════════════
         # STAGE 2 — LLM classification (when keywords ambiguous: tied or both zero)
         # ═══════════════════════════════════════════════════════════════════════════════
         # Call LLM for semantic analysis since keyword matching inconclusive
-        logger.debug(f"Keywords ambiguous (analysis={analysis_score}, rag={rag_score}) → using LLM")
+        logger.debug(f"Keywords ambiguous (analysis={analysis_score}, rag={rag_score}, code={code_score}) → using LLM")
         task_type = _llm_classify(question)
-        confidence_score = CONFIDENCE_MEDIUM  # 0.70 - LLM is less certain than keyword match
+        confidence_score = CONFIDENCE_MEDIUM if any(s > 0 for s in scores.values()) else CONFIDENCE_LOW
 
-    logger.info(f"Task classified: {task_type} (analysis={analysis_score}, rag={rag_score}, conf={confidence_score:.2f})")
+    logger.info(f"Task classified: {task_type} (analysis={analysis_score}, rag={rag_score}, code={code_score}, conf={confidence_score:.2f})")
 
     return {
         **state,
@@ -328,13 +338,14 @@ def _llm_classify(question: str) -> str:
     try:
         # Get LLM and build classification prompt
         llm = get_llm()
-        prompt = f"""Classifie cette question en UN seul mot: 'analysis' ou 'rag'.
+        prompt = f"""Classifie cette question en UN seul mot: 'analysis', 'code' ou 'rag'.
 - 'analysis': questions sur des fichiers CSV, données, statistiques, ML
+- 'code': questions sur l'exécution de code, programmation, scripts Python
 - 'rag': questions sur des documents PDF, lois, réglementations, RGPD
 
 Question: {question}
 
-Réponds UNIQUEMENT avec 'analysis' ou 'rag'."""
+Réponds UNIQUEMENT avec 'analysis', 'code' ou 'rag'."""
 
         # Invoke LLM and extract response
         response = llm.invoke([HumanMessage(content=prompt)])
@@ -344,6 +355,9 @@ Réponds UNIQUEMENT avec 'analysis' ou 'rag'."""
         if "analysis" in result:
             logger.debug(f"LLM classified as: analysis")
             return "analysis"
+        elif "code" in result:
+            logger.debug(f"LLM classified as: code")
+            return "code"
         elif "rag" in result:
             logger.debug(f"LLM classified as: rag")
             return "rag"
@@ -494,6 +508,82 @@ def run_rag_node(state: AgentState) -> AgentState:
 
 
 # ═══════════════════════════════════════════
+# NODE 2c — Run code sandbox
+# ═══════════════════════════════════════════
+
+def run_code_node(state: AgentState) -> AgentState:
+    """
+    NODE 2c: Execute user question as Python code in isolated sandbox.
+
+    Called when task_type == 'code'. Generates Python code from question,
+    validates it, then runs in isolated Docker container with resource limits.
+
+    Execution Pipeline (3 stages):
+    STAGE 1: Generate Python code from question via LLM
+    STAGE 2: Validate generated code (AST + RestrictedPython)
+    STAGE 3: Execute in Docker sandbox with timeout + resource limits
+
+    Output State Changes:
+    - result: Sandbox execution result with output/errors
+    - answer: Formatted execution output
+    - error: str or None
+    - steps_taken: Appended with 'code → success' or 'failed'
+
+    Performance: 10-35 seconds typical (sandbox execution dominated)
+    """
+    from backend.engines.sandbox.sandbox_runner import run_in_sandbox
+    from backend.engines.sandbox.result_formatter import format_result
+
+    question = state["question"]
+    logger.info(f"Running code sandbox for: {question[:80]}")
+
+    # STAGE 1: Generate Python code from question
+    try:
+        llm = get_llm()
+        prompt = f"""Génère uniquement du code Python pour répondre à cette demande.
+Réponds UNIQUEMENT avec le code Python, sans explications, sans balises markdown.
+
+Demande: {question}"""
+        response = llm.invoke([HumanMessage(content=prompt)])
+        generated_code = response.content.strip()
+        # Strip markdown fences if LLM adds them
+        if generated_code.startswith("```"):
+            generated_code = "\n".join(generated_code.split("\n")[1:-1])
+        logger.debug(f"Generated code ({len(generated_code)} chars)")
+    except Exception as e:
+        logger.error(f"Code generation failed: {e}")
+        return {
+            **state,
+            "error": f"Code generation failed: {e}",
+            "answer": f"Impossible de générer le code: {e}",
+            "steps_taken": state.get("steps_taken", []) + ["code → generation failed"]
+        }
+
+    # STAGE 2 & 3: Run in sandbox (validates + executes)
+    sandbox_result = run_in_sandbox(generated_code)
+    formatted = format_result(sandbox_result)
+
+    if not formatted.success:
+        logger.warning(f"Sandbox execution failed: {formatted.error}")
+        return {
+            **state,
+            "result": sandbox_result,
+            "error": formatted.error,
+            "answer": f"Erreur lors de l'exécution: {formatted.error}",
+            "steps_taken": state.get("steps_taken", []) + ["code → failed"]
+        }
+
+    logger.info(f"Code execution succeeded")
+    return {
+        **state,
+        "result": sandbox_result,
+        "answer": formatted.to_agent_message(),
+        "error": None,
+        "steps_taken": state.get("steps_taken", []) + ["code → success"]
+    }
+
+
+# ═══════════════════════════════════════════
 # NODE 3 — Format final answer
 # ═══════════════════════════════════════════
 
@@ -550,11 +640,11 @@ def format_answer(state: AgentState) -> AgentState:
 # ROUTER — decides which node to run
 # ═══════════════════════════════════════════
 
-def route_task(state: AgentState) -> Literal["analysis", "rag"]:
+def route_task(state: AgentState) -> Literal["analysis", "rag", "code"]:
     """
     ROUTER: Conditional edge that directs execution.
 
-    Called after classify_task. Routes to analysis or RAG node based on task_type.
+    Called after classify_task. Routes to analysis, code, or RAG node based on task_type.
     RAG is default fallback since it requires no external file.
 
     Performance: <1ms (simple comparison)
@@ -565,6 +655,9 @@ def route_task(state: AgentState) -> Literal["analysis", "rag"]:
     if task_type == "analysis":
         # Route to Phase 1 (CSV analysis pipeline)
         return "analysis"
+    elif task_type == "code":
+        # Route to Phase 3 (Code sandbox execution)
+        return "code"
     
     # Default to Phase 2 (RAG) for safety (requires no external file)
     return "rag"
@@ -599,23 +692,26 @@ def build_agent() -> StateGraph:
     graph.add_node("classify", classify_task)  # Node 1: Task classification
     graph.add_node("analysis", run_analysis_node)  # Node 2a: Phase 1 analysis
     graph.add_node("rag", run_rag_node)  # Node 2b: Phase 2 RAG
+    graph.add_node("code", run_code_node)  # Node 2c: Phase 3 code execution
     graph.add_node("format", format_answer)  # Node 3: Answer formatting
 
     # ENTRY POINT: Always start with classification
     graph.set_entry_point("classify")
 
-    # CONDITIONAL ROUTING: From classify → analysis OR rag
+    # CONDITIONAL ROUTING: From classify → analysis OR code OR rag
     graph.add_conditional_edges(
         "classify",  # From node
         route_task,  # Router function
         {
             "analysis": "analysis",  # If analysis task
+            "code": "code",  # If code task
             "rag": "rag"  # If RAG task
         }
     )
 
-    # SEQUENTIAL EDGES: Both paths converge at format
+    # SEQUENTIAL EDGES: All paths converge at format
     graph.add_edge("analysis", "format")
+    graph.add_edge("code", "format")
     graph.add_edge("rag", "format")
     
     # EXIT: Format → END
