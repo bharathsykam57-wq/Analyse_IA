@@ -151,22 +151,70 @@ class AgentState(TypedDict):
         - Fallback path: ["classify", "generate_answer"] (if task_type='unknown')
         - Performance implications: Minimal (list append operation <1μs per step)
 
+    session_id (Optional[str]):
+        Unique identifier for conversation session (multi-turn support).
+        - Type: String identifier for grouping related questions
+        - Set by: User input or generated from timestamp + user_id
+        - Example: "user_12345_2024-03-11" or "session_abc123"
+        - Purpose: Group questions in same conversation thread
+        - Usage: Retrieve prior analysis results for context-aware follow-ups
+        - Default: "default" (no session tracking, each question independent)
+        - Multi-turn example:
+          * Q1 with session_id="user_123" → stores analysis result in memory
+          * Q2 with session_id="user_123" → retrieves and references Q1 result
+        - Persistence: In-memory storage per session_id (clears on server restart)
+
+    confidence_score (Optional[float]):
+        Classification confidence metric (0.0-1.0) from hybrid keyword+LLM approach.
+        - Type: Float between 0.0 (not confident) and 1.0 (very confident)
+        - Set by: Classifier node based on keyword matching strength + LLM fallback
+        - Calculation formula:
+          * 0.95: Strong keyword match (5+ keywords from leading category)
+          * 0.85: Moderate keyword match (3-4 keywords)
+          * 0.75: Single keyword match with no ambiguity
+          * 0.70: LLM semantic classification (triggered by tied/zero keyword scores)
+          * 0.50: Ambiguous classification or error condition
+        - Usage: Explainability (show users how certain agent is about task type)
+        - Example output: {"task_type": "analysis", "confidence_score": 0.95}
+        - Interpretation:
+          * ≥0.90: High confidence, use classification without hesitation
+          * 0.70-0.85: Moderate confidence, classification likely correct but consider alternatives
+          * <0.70: Low confidence, classification may be uncertain, consider user clarification
+        - Default: 0.0 initially, set by classify_task node
+
+    prior_analysis_context (Optional[dict]):
+        Reference to most recent analysis result from same session (multi-turn memory).
+        - Type: Dictionary with analysis metadata or None if no prior analysis
+        - Set by: run_agent() function by retrieving from SESSION_MEMORY
+        - Structure: {"dataset_path": "...", "rows": int, "best_model": "...", "anomalies": {...}}
+        - Usage: Enable follow-up questions to reference prior analysis
+        - Example follow-up: Q1: "Analyze data.csv" → Q2: "Refine the anomaly detection"
+        - Access: Question classification node can use this for context
+        - Default: None (no prior analysis in session)
+        - Lifecycle: Only populated if same session_id used for multiple questions
+        - Privacy: Session-scoped, not shared across users or sessions
+
     """
     # Core message management (LangGraph accumulation)
-    messages:     Annotated[list, add_messages]
+    messages:                 Annotated[list, add_messages]
     
     # User input and intent
-    question:     str
+    question:                 str
     
     # Task routing fields
-    task_type:    Optional[str]
-    dataset_path: Optional[str]
-    pdf_source:   Optional[str]
+    task_type:                Optional[str]
+    dataset_path:             Optional[str]
+    pdf_source:               Optional[str]
     
     # Execution results and responses
-    result:       Optional[dict]
-    answer:       Optional[str]
-    error:        Optional[str]
+    result:                   Optional[dict]
+    answer:                   Optional[str]
+    error:                    Optional[str]
     
     # Execution tracking
-    steps_taken:  list[str]
+    steps_taken:              list[str]
+    
+    # Multi-turn support (NEW)
+    session_id:               Optional[str]                # Session identifier for multi-turn conversations
+    confidence_score:         Optional[float]              # Classification confidence (0.0-1.0)
+    prior_analysis_context:   Optional[dict]               # Reference to previous analysis in same session
