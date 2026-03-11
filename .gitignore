@@ -24,3 +24,4 @@ frontend/.next/
 .ipynb_checkpoints/
 *.ipynb
 data/
+data/pdfs/
