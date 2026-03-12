@@ -11,6 +11,7 @@ from backend.api.routes.health import router as health_router
 from backend.api.auth.router import router as auth_router
 from backend.api.routes.files import router as files_router
 from backend.api.routes.agent import router as agent_router
+from backend.api.websocket.router import router as ws_router
 
 load_dotenv()
 
@@ -78,6 +79,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(agent_router)
+app.include_router(ws_router)
 
 
 @app.get("/")
