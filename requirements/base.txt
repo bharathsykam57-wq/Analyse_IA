@@ -15,3 +15,4 @@ scikit-learn==1.4.2
 lightgbm==4.6.0
 pyod==2.0.7
 shap==0.44.1RestrictedPython==7.1
+langdetect==1.0.9
