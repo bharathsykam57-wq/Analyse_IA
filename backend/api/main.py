@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from backend.api.routes.health import router as health_router
 from backend.api.auth.router import router as auth_router
 from backend.api.routes.files import router as files_router
+from backend.api.routes.agent import router as agent_router
 
 load_dotenv()
 
@@ -76,6 +77,7 @@ async def log_requests(request: Request, call_next):
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(files_router)
+app.include_router(agent_router)
 
 
 @app.get("/")

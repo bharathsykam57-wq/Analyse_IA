@@ -382,9 +382,7 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
         })
 
         # Lazy import to prevent circular dependencies at module load time
-        from backend.agent.master_agent import MasterAgent
-
-        agent = MasterAgent()
+        from backend.agent.master_agent import run_agent as master_run_agent
 
         # Notify client: Agent initializing
         publish_progress(task_id, {
@@ -394,10 +392,10 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
         })
 
         # Execute agent with query and optional file context
-        result = agent.run(
-            query=query,
+        result = master_run_agent(
+            question=query,
             session_id=session_id,
-            file_path=file_path,
+            dataset_path=file_path,
         )
 
         # Notify client: Completed
