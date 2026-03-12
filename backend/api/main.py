@@ -1,4 +1,21 @@
-# backend/api/main.py
+
+"""Analyse_IA FastAPI application with async task orchestration and RGPD compliance.
+
+Architecture:
+  - Authentication: JWT + refresh tokens (auth_router)
+  - File Management: Multi-user upload with validation (files_router)
+  - Task Orchestration: Async agent dispatch (agent_router)
+  - Real-Time Streaming: WebSocket progress updates (ws_router)
+  - RGPD Compliance: Consent, audit, export, erasure (rgpd_router)
+
+Middleware:
+  - CORS: Cross-origin resource sharing
+  - HTTP Logging: Request timing, status codes (X-Process-Time-Ms header)
+
+Environment:
+  - Development: OpenAPI docs enabled (/docs, /redoc)
+  - Production: Docs disabled for security
+"""
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +29,7 @@ from backend.api.auth.router import router as auth_router
 from backend.api.routes.files import router as files_router
 from backend.api.routes.agent import router as agent_router
 from backend.api.websocket.router import router as ws_router
+from backend.api.rgpd.router import router as rgpd_router
 
 load_dotenv()
 
@@ -59,6 +77,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    """Log all HTTP requests with timing for debugging and monitoring."""
     start_time = time.time()
     response = await call_next(request)
     process_time_ms = (time.time() - start_time) * 1000
@@ -69,17 +88,18 @@ async def log_requests(request: Request, call_next):
         f"({process_time_ms:.2f}ms)"
     )
 
-    # Expose timing to frontend/debugging tools
+    # Expose timing to client (debugging, monitoring)
     response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
     return response
 
 
-# Register routes
+# Route registration (ordered by phase: auth → upload → task → stream → compliance)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(agent_router)
 app.include_router(ws_router)
+app.include_router(rgpd_router)
 
 
 @app.get("/")

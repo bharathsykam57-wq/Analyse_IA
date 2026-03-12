@@ -36,3 +36,4 @@ temp/
 # Alembic
 alembic/versions/__pycache__/
 test_ws.sh
+test_rgpd.sh
