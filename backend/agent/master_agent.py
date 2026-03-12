@@ -97,6 +97,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from backend.agent.agent_state import AgentState
 from backend.agent.tools.analysis_tool import run_analysis
 from backend.agent.tools.rag_tool import ask_document, get_indexed_documents
+from backend.utils.language import detect_language
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +230,11 @@ def classify_task(state: AgentState) -> AgentState:
     question = state["question"]
     logger.info(f"Classifying task: {question[:80]}")
 
+    # Detect language from original question before history appended
+    original_question = question.split("\nPrécédente analyse:")[0].strip()
+    language = detect_language(original_question)
+    logger.info(f"Language detected: {language}")
+
     # ═══════════════════════════════════════════════════════════════════════════════
     # STAGE 1 — Keyword-based classification (fast, <10ms, no LLM call)
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -307,6 +313,7 @@ def classify_task(state: AgentState) -> AgentState:
 
     return {
         **state,
+        "language": language,
         "task_type": task_type,
         "confidence_score": confidence_score,  # NEW: Confidence metric
         "steps_taken": state.get("steps_taken", []) + [f"classify → {task_type} (conf={confidence_score:.2f})"]
@@ -608,14 +615,18 @@ def format_answer(state: AgentState) -> AgentState:
     answer = state.get("answer", "")
     result = state.get("result", {})
     task_type = state.get("task_type", "unknown")
+    language = state.get("language", "fr")
 
     # POST-PROCESS RAG ANSWERS: Add source citations
     if task_type == "rag" and result:
         # Extract sources list from tool result
         sources = result.get("sources", [])
         if sources:
-            # Append citations section to answer
-            answer += "\n\n**Sources consultées :**"
+            # Append citations section to answer (bilingual)
+            if language == 'en':
+                answer += "\n\n**Sources consulted:**"
+            else:
+                answer += "\n\n**Sources consultées :**"
             
             # Deduplicate by (source, page) pair using set tracking
             seen = set()
@@ -623,8 +634,11 @@ def format_answer(state: AgentState) -> AgentState:
                 # Create unique key for deduplication
                 key = f"{s['source']} p.{s['page']}"
                 if key not in seen:
-                    # Format source citation with similarity score
-                    answer += f"\n- {s['source']} (page {s['page']}, similarité: {s['similarity']:.2f})"
+                    # Format source citation with similarity score (bilingual)
+                    if language == 'en':
+                        answer += f"\n- {s['source']} (page {s['page']}, similarity: {s['similarity']:.2f})"
+                    else:
+                        answer += f"\n- {s['source']} (page {s['page']}, similarité: {s['similarity']:.2f})"
                     seen.add(key)
 
     logger.info(f"Answer formatted: {len(answer)} chars")

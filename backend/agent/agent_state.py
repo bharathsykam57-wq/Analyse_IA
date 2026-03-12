@@ -201,6 +201,7 @@ class AgentState(TypedDict):
     
     # User input and intent
     question:                 str
+    language:                 str                          # 'fr' or 'en'
     
     # Task routing fields
     task_type:                Optional[str]

@@ -38,6 +38,7 @@ import logging
 import requests
 from backend.engines.rag.embedding_engine import embed_text
 from backend.engines.rag.vector_store import search_similar
+from backend.utils.language import detect_language, translate_to_french
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ TOP_K = 5
 MAX_CONTEXT_CHARS = 3000
 
 
-def build_prompt(question: str, chunks: list[dict]) -> str:
+def build_prompt(question: str, chunks: list[dict], language: str = 'fr') -> str:
     """Build a French RAG prompt with context and instructions.
 
     Formats retrieved chunks into a structured prompt with:
@@ -107,16 +108,29 @@ def build_prompt(question: str, chunks: list[dict]) -> str:
     if len(context) > MAX_CONTEXT_CHARS:
         context = context[:MAX_CONTEXT_CHARS] + "..."
 
-    # Construct French RAG prompt with:
-    # - System instructions (respond only from context, cite sources, use French)
+    # Construct RAG prompt with bilingual support:
+    # - System instructions (respond only from context, cite sources, use selected language)
     # - Context from search results
     # - User question
     # - Response placeholder for LLM to complete
-    prompt = f"""Tu es un assistant expert en analyse de données et réglementation française.
-Réponds à la question en te basant UNIQUEMENT sur le contexte fourni.
-Si la réponse n'est pas dans le contexte, dis-le clairement.
-Cite toujours tes sources (nom du document et numéro de page).
-Réponds en français.
+    if language == 'en':
+        instruction = (
+            "You are an expert assistant in data analysis and French regulation.\n"
+            "Answer the question based ONLY on the provided context.\n"
+            "If the context does not contain the answer, say so clearly.\n"
+            "Always cite your sources (document name and page number).\n"
+            "Answer in English."
+        )
+    else:
+        instruction = (
+            "Tu es un assistant expert en analyse de données et réglementation française.\n"
+            "Réponds à la question en te basant UNIQUEMENT sur le contexte fourni.\n"
+            "Si la réponse n'est pas dans le contexte, dis-le clairement.\n"
+            "Cite toujours tes sources (nom du document et numéro de page).\n"
+            "Réponds en français."
+        )
+
+    prompt = f"""{instruction}
 
 CONTEXTE:
 {context}
@@ -306,8 +320,13 @@ def ask(question: str, top_k: int = TOP_K) -> dict:
     logger.info(f"→ RAG query received: {question[:80]}...")
 
     # STAGE 1: EMBEDDING — Convert question to 768-dim vector
+    # Translate to French if English detected (improves similarity matching against French indexed chunks)
+    query_language = detect_language(question)
+    query_for_embedding = translate_to_french(question) if query_language == 'en' else question
+    if query_language == 'en':
+        logger.info(f"English query detected — translating for embedding")
     # This vector will be used to find semantically similar chunks in database
-    query_embedding = embed_text(question)
+    query_embedding = embed_text(query_for_embedding)
     if query_embedding is None:
         logger.error("✗ Embedding failed (Ollama unavailable?)")
         return {"success": False, "error": "Failed to embed question"}
@@ -336,10 +355,11 @@ def ask(question: str, top_k: int = TOP_K) -> dict:
 
     logger.info(f"✓ Retrieved {len(chunks)} chunks, top similarity: {chunks[0]['similarity']:.4f}")
 
-    # STAGE 3: PROMPT ENGINEERING — Build French RAG prompt with instructions
+    # STAGE 3: PROMPT ENGINEERING — Build bilingual RAG prompt with instructions
     # This combines system instructions, context (chunks), and question
     # Instructs model to use only provided context and cite sources
-    prompt = build_prompt(question, chunks)
+    # Language selected from detected query language (French or English)
+    prompt = build_prompt(question, chunks, language=query_language)
 
     # STAGE 4: GENERATION — Send prompt to LLM, wait for answer
     # mistral-nemo responds in French with source citations and reasoning
