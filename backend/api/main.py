@@ -8,6 +8,7 @@ import time
 import os
 from dotenv import load_dotenv
 from backend.api.routes.health import router as health_router
+from backend.api.auth.router import router as auth_router
 
 load_dotenv()
 
@@ -72,6 +73,7 @@ async def log_requests(request: Request, call_next):
 
 # Register routes
 app.include_router(health_router)
+app.include_router(auth_router)
 
 
 @app.get("/")

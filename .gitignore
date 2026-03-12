@@ -32,3 +32,6 @@ data/pdfs/
 alembic/versions/*.pyc
 uploads/
 temp/
+
+# Alembic
+alembic/versions/__pycache__/
