@@ -25,3 +25,10 @@ frontend/.next/
 *.ipynb
 data/
 data/pdfs/
+
+# Phase 5 additions
+*.db
+*.sqlite
+alembic/versions/*.pyc
+uploads/
+temp/
