@@ -26,7 +26,8 @@ export async function register(data: RegisterRequest): Promise<User> {
 
 export async function logout(): Promise<void> {
   try {
-    await api.post('/auth/logout', {})
+    const refresh_token = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null
+    await api.post('/auth/logout', { refresh_token })
   } catch {
     // Logout endpoint may not exist or fail, but we still clear tokens
   } finally {

@@ -20,6 +20,7 @@ Integration:
 
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Optional
 import logging
@@ -228,3 +229,58 @@ def _parse_accept_language(header: Optional[str]) -> Optional[str]:
     if primary.startswith("en"):
         return "en"
     return None
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /agent/history — Query experiment_runs for user's analysis history
+# ═══════════════════════════════════════════════════════════════════════════════
+@router.get("/history")
+def get_history(
+    limit: int = 20,
+    offset: int = 0,
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Return the current user's analysis history from experiment_runs."""
+    try:
+        from sqlalchemy import text
+        result = db.execute(
+            text("""
+                SELECT id, task_type, question, answer_preview,
+                       best_model, accuracy, confidence_score,
+                       dataset_rows, language, created_at
+                FROM experiment_runs
+                WHERE user_id = :user_id
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"user_id": str(current_user.id), "limit": limit, "offset": offset}
+        )
+        rows = result.fetchall()
+        total = db.execute(
+            text("SELECT COUNT(*) FROM experiment_runs WHERE user_id = :user_id"),
+            {"user_id": str(current_user.id)}
+        ).scalar()
+        return {
+            "history": [
+                {
+                    "id": row.id,
+                    "task_type": row.task_type,
+                    "question": row.question,
+                    "answer_preview": row.answer_preview,
+                    "best_model": row.best_model,
+                    "accuracy": row.accuracy,
+                    "confidence_score": row.confidence_score,
+                    "dataset_rows": row.dataset_rows,
+                    "language": row.language,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"history": [], "total": 0, "limit": limit, "offset": offset, "error": str(e)}
