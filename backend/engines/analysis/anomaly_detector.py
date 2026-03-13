@@ -390,7 +390,7 @@ def detect_anomalies(
                     if percentile > 95 or percentile < 5:
                         anomalous_features.append({
                             'feature': col,
-                            'value': round(float(val), 4),
+                            'value': round(float(val), 4) if isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.','',1).lstrip('-').isdigit()) else str(val),
                             'percentile': round(percentile, 1)  # Percentile rank in dataset
                         })
 

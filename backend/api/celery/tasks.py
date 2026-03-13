@@ -79,6 +79,9 @@ import logging
 import redis
 import json
 import os
+import time
+from backend.monitoring.langfuse_client import trace_analysis
+from backend.monitoring.experiment_tracker import log_experiment_sync
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +408,37 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
             "result": result,
         })
 
+        try:
+            trace_analysis(
+                user_id=session_id,
+                session_id=task_id,
+                question=query,
+                answer=result.get("answer", ""),
+                task_type=result.get("task_type", "analysis"),
+                confidence_score=result.get("confidence_score", 0.0),
+                dataset_rows=result.get("result", {}).get("rows") if result.get("result") else None,
+                best_model=result.get("result", {}).get("best_model") if result.get("result") else None,
+            )
+        except Exception as trace_err:
+            logger.warning(f"Langfuse trace failed: {trace_err}")
+        try:
+            log_experiment_sync(
+                run_id=task_id,
+                user_id=session_id,
+                session_id=task_id,
+                task_type=result.get("task_type", "analysis"),
+                question=query,
+                answer=result.get("answer", ""),
+                dataset_rows=result.get("result", {}).get("rows") if result.get("result") else None,
+                dataset_columns=result.get("result", {}).get("columns") if result.get("result") else None,
+                best_model=result.get("result", {}).get("best_model") if result.get("result") else None,
+                metrics=result.get("result", {}).get("metrics") if result.get("result") else None,
+                anomaly_count=result.get("result", {}).get("anomalies", {}).get("total") if result.get("result") else None,
+                confidence_score=result.get("confidence_score", 0.0),
+                language=language,
+            )
+        except Exception as exp_err:
+            logger.warning(f"Experiment log failed: {exp_err}")
         return result
 
     except Exception as e:

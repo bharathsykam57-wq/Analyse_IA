@@ -55,3 +55,8 @@ Telco-Customer-Churn.csv
 
 frontend/.env.local
 frontend/.env.production
+# Phase 7 — MLOps
+backend/api/celery/tasks.py.bak
+*.bak
+langfuse.db
+.langfuse/
