@@ -22,9 +22,8 @@ celery[redis]==5.4.0
 
 # LLM — Groq only (no Ollama in cloud)
 groq==0.37.1
-langchain==0.3.9
-langchain-groq==1.1.2
-langchain-core==0.3.21
+langchain
+langchain-groq
 
 # ML
 pandas==2.1.4
