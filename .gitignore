@@ -60,3 +60,4 @@ backend/api/celery/tasks.py.bak
 *.bak
 langfuse.db
 .langfuse/
+.env.production
