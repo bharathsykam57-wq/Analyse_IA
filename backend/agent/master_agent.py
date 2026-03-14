@@ -91,7 +91,9 @@ Future Enhancements:
 import logging
 from typing import Literal
 from langgraph.graph import StateGraph, END
+import os
 from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage
 
 from backend.agent.agent_state import AgentState
@@ -177,6 +179,13 @@ def get_llm():
     - Exception if Ollama server not running at base_url
     - Caller should wrap in try-catch for connection failures
     """
+    provider = os.getenv("LLM_PROVIDER", "ollama")
+    if provider == "groq":
+        return ChatGroq(
+            model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            api_key=os.getenv("GROQ_API_KEY"),
+            temperature=0.1,
+        )
     return ChatOllama(
         model=LLM_MODEL,
         base_url=OLLAMA_URL,

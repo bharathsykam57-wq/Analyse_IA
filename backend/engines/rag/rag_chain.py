@@ -196,36 +196,38 @@ def generate_answer(prompt: str) -> dict:
         - Sufficient system memory (7B parameter model)
     """
     try:
-        # POST to Ollama API with model, prompt, and generation parameters
-        response = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": LLM_MODEL,            # mistral-nemo:latest
-                "prompt": prompt,              # Full RAG prompt from build_prompt()
-                "stream": False,               # Collect full response (not streaming)
-                "options": {
-                    "temperature": 0.1,        # Low randomness: favor likely tokens (factual responses)
-                    "top_p": 0.9,              # Nucleus sampling: keep top 90% probability mass
-                    "num_predict": 512         # Limit to 512 tokens (~2-4 sentences)
-                }
-            },
-            timeout=120  # Allow up to 120s for model to complete (slow systems)
-        )
+        import os
+        provider = os.getenv("LLM_PROVIDER", "ollama")
 
-        # Check HTTP status code
-        if response.status_code != 200:
-            logger.error(f"✗ Ollama generate failed: HTTP {response.status_code}")
-            return {"success": False, "error": f"Ollama error: {response.status_code}"}
+        if provider == "groq":
+            from groq import Groq
+            client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            chat_response = client.chat.completions.create(
+                model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=512,
+                temperature=0.1,
+            )
+            answer = chat_response.choices[0].message.content.strip()
+        else:
+            response = requests.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": LLM_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1, "top_p": 0.9, "num_predict": 512}
+                },
+                timeout=120
+            )
+            if response.status_code != 200:
+                logger.error(f"✗ Ollama generate failed: HTTP {response.status_code}")
+                return {"success": False, "error": f"Ollama error: {response.status_code}"}
+            answer = response.json().get("response", "").strip()
 
-        # Extract response text from JSON, remove leading/trailing whitespace
-        answer = response.json().get("response", "").strip()
-
-        # Verify response is not empty (indicates model failure or error)
         if not answer:
-            logger.error("✗ Empty response from mistral-nemo (model may have failed)")
+            logger.error("✗ Empty response from model")
             return {"success": False, "error": "Empty response from model"}
-
-        # Success: return generated answer
         logger.info(f"✓ Generated answer: {len(answer)} characters")
         return {"success": True, "answer": answer, "error": None}
 
