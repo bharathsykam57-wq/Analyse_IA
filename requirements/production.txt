@@ -1,0 +1,50 @@
+# Core FastAPI
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+pydantic[email]==2.10.3
+
+# Database
+sqlalchemy==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+pgvector==0.3.6
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# Redis + Celery
+redis==5.2.1
+celery[redis]==5.4.0
+
+# LLM — Groq only (no Ollama in cloud)
+groq==0.13.1
+langchain==0.3.9
+langchain-groq==1.1.2
+langchain-core==0.3.21
+
+# ML
+pandas==2.1.4
+numpy==1.26.4
+scipy==1.11.4
+scikit-learn==1.4.2
+pycaret==3.3.2
+shap==0.44.1
+lightgbm==4.6.0
+pyod==2.0.7
+plotly==6.6.0
+
+# RAG
+langdetect==1.0.9
+
+# Monitoring
+langfuse==2.36.2
+
+# Utils
+python-dotenv==1.2.2
+httpx==0.28.1
+aiofiles==24.1.0
+websockets==14.1
