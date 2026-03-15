@@ -7,8 +7,13 @@ load_dotenv()
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # SSL Configuration for Upstash Redis (rediss://)
+# Using ssl_cert_reqs="CERT_NONE" for Upstash free tier compatibility
+# In production, consider using CERT_REQUIRED with proper CA bundle
 USE_REDIS_SSL = REDIS_URL.startswith("rediss://")
-ssl_config = {"ssl_cert_reqs": "CERT_NONE"} if USE_REDIS_SSL else {}
+ssl_config = {
+    "ssl_cert_reqs": "CERT_NONE",  # TODO: Switch to CERT_REQUIRED in production with CA bundle
+    "ssl_check_hostname": False,    # Related to CERT_NONE; set to True with CERT_REQUIRED
+} if USE_REDIS_SSL else {}
 
 celery_app = Celery(
     "analyse_ia",
