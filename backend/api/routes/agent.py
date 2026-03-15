@@ -117,19 +117,43 @@ async def ask_agent(
     )
 
     file_path = None
-    if request.file_id:
-        import os
-        user_upload_dir = os.path.join("uploads", str(current_user.id))
-        if os.path.exists(user_upload_dir):
-            for filename in os.listdir(user_upload_dir):
+    import os
+    user_upload_dir = os.path.join("uploads", str(current_user.id))
+    
+    if os.path.exists(user_upload_dir):
+        files_with_times = []
+        
+        # List all files with their modification times
+        for filename in os.listdir(user_upload_dir):
+            if filename.startswith('.'):  # Skip hidden files
+                continue
+                
+            full_path = os.path.join(user_upload_dir, filename)
+            
+            # If file_id provided, match it specifically
+            if request.file_id:
                 if filename.startswith(request.file_id):
-                    file_path = os.path.join(user_upload_dir, filename)
+                    file_path = full_path
                     break
-        if not file_path:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Fichier introuvable. Vérifiez le file_id.",
-            )
+            else:
+                # No file_id: find most recent CSV file
+                if filename.lower().endswith('.csv'):
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                        files_with_times.append((full_path, mtime))
+                    except OSError:
+                        pass
+        
+        # If no specific file_id match, use most recent CSV
+        if not file_path and files_with_times and not request.file_id:
+            file_path = max(files_with_times, key=lambda x: x[1])[0]
+    
+    # If file_id was explicitly provided but not found, raise error
+    if request.file_id and not file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Fichier introuvable. Vérifiez le file_id.",
+        )
 
     task = run_agent.apply_async(
         kwargs={
