@@ -120,7 +120,10 @@ async def ask_agent(
     import os
     user_upload_dir = os.path.join("uploads", str(current_user.id))
     
+    logger.info(f"Looking for files in: {user_upload_dir} (user_id={current_user.id})")
+    
     if os.path.exists(user_upload_dir):
+        logger.info(f"Upload directory exists, scanning for files...")
         files_with_times = []
         
         # List all files with their modification times
@@ -134,6 +137,7 @@ async def ask_agent(
             if request.file_id:
                 if filename.startswith(request.file_id):
                     file_path = full_path
+                    logger.info(f"Found matching file for file_id: {file_path}")
                     break
             else:
                 # No file_id: find most recent CSV file
@@ -141,12 +145,16 @@ async def ask_agent(
                     try:
                         mtime = os.path.getmtime(full_path)
                         files_with_times.append((full_path, mtime))
+                        logger.debug(f"Found CSV: {filename} (mtime={mtime})")
                     except OSError:
                         pass
         
         # If no specific file_id match, use most recent CSV
         if not file_path and files_with_times and not request.file_id:
             file_path = max(files_with_times, key=lambda x: x[1])[0]
+            logger.info(f"Auto-selected most recent CSV: {file_path}")
+    else:
+        logger.warning(f"Upload directory does not exist: {user_upload_dir}")
     
     # If file_id was explicitly provided but not found, raise error
     if request.file_id and not file_path:
