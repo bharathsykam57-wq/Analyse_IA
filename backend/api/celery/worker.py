@@ -27,6 +27,9 @@ celery_app.conf.update(
     broker_use_ssl=ssl_config,
     redis_backend_use_ssl=ssl_config,
 
+    # Broker connection retry (fixes Celery 6.0 deprecation warning)
+    broker_connection_retry_on_startup=True,
+
     # Serialization
     task_serializer="json",
     accept_content=["json"],

@@ -17,4 +17,7 @@ RUN chown -R celeryuser:celeryuser /app
 # Switch to non-root user
 USER celeryuser
 
+# Create matplotlib config directory and set environment variable
+ENV MPLCONFIGDIR=/tmp/matplotlib
+
 CMD ["celery", "-A", "backend.api.celery.worker", "worker", "--loglevel=info", "-Q", "analysis,rag,agent", "--concurrency=1"]
