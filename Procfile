@@ -1,0 +1,1 @@
+worker: celery -A backend.api.celery.worker worker --loglevel=info -Q analysis,rag,agent --concurrency=1
