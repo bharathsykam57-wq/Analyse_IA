@@ -11,3 +11,16 @@ services:
         value: production
       - key: PYTHON_VERSION
         value: 3.11.0
+
+  - type: worker
+    name: analyse-ia-celery
+    runtime: python
+    buildCommand: pip install -r requirements/production.txt
+    startCommand: celery -A backend.api.celery.worker worker --loglevel=info -Q analysis,rag,agent --concurrency=1
+    envVars:
+      - key: LLM_PROVIDER
+        value: groq
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.0
