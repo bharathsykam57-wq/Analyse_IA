@@ -100,12 +100,17 @@ load_dotenv()
 # Redis Connection Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
 # REDIS_URL: Message broker and result backend location
-# Format: redis://[password@]host:port/db
+# Format: redis://[password@]host:port/db or rediss://... (secure)
 # Examples:
 #   Local: redis://localhost:6379/0
 #   Production: redis://:password@redis.example.com:6379/0
-#   Cluster: redis+sentinel://...
+#   Secure (Render): rediss://:password@host:port/db?ssl_cert_reqs=required
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# SSL Configuration for Secure Redis (rediss://)
+# Detect if Redis URL uses SSL (rediss:// protocol)
+USE_REDIS_SSL = REDIS_URL.startswith("rediss://")
+broker_use_ssl = {"ssl_cert_reqs": "required"} if USE_REDIS_SSL else {}
 
 # Celery Application Initialization
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -114,6 +119,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 #   - broker: Redis URL for message queue (task distribution)
 #   - backend: Redis URL for result storage (task result persistence)
 #   - include: Module paths to auto-import tasks (enables task discovery)
+#   - broker_use_ssl: SSL config for secure Redis connections
 celery_app = Celery(
     "analyse_ia",
     broker=REDIS_URL,
@@ -124,6 +130,17 @@ celery_app = Celery(
 # Celery Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
 celery_app.conf.update(
+    # ─────────────────────────────────────────────────────────────────────────
+    # SSL Configuration for Secure Redis
+    # ─────────────────────────────────────────────────────────────────────────
+    # broker_use_ssl: SSL configuration for Redis connections
+    #   - Required when using rediss:// protocol (Render Redis)
+    #   - ssl_cert_reqs="required": Verify server certificate (CERT_REQUIRED)
+    #   - ssl_cert_reqs="optional": Accept certificates but don't verify (CERT_OPTIONAL)
+    #   - ssl_cert_reqs="none": No certificate validation (CERT_NONE)
+    # Note: Upstash and Render both require "required"
+    broker_use_ssl=broker_use_ssl,
+
     # ─────────────────────────────────────────────────────────────────────────
     # Serialization Configuration
     # ─────────────────────────────────────────────────────────────────────────
