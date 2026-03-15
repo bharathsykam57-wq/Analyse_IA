@@ -95,23 +95,41 @@ def run_migrations_online() -> None:
     - Applies migration scripts within database transaction
     - Rolls back automatically if any migration fails
     
-    Configuration: Uses sqlalchemy.* settings from alembic.ini
-    Connection Pool: NullPool (no pooling) for compatibility with Alembic
+    Configuration: Uses DATABASE_URL for Supabase Transaction Pooler (port 6543)
+    Connection Pool: NullPool (no pooling) for migration safety
+    SSL: Required for Supabase cloud connections
+    Timeout: Optimized for Transaction Pooler's idle timeout (~15 seconds)
     """
-    # Create SQLAlchemy Engine from alembic.ini [sqlalchemy] section
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,  # Disable connection pooling for migration compatibility
+    from sqlalchemy import create_engine
+    
+    url = config.get_main_option("sqlalchemy.url")
+    
+    # Create engine with explicit configuration for Supabase Transaction Pooler
+    # Transaction Pooler (port 6543) characteristics:
+    # - Idle timeout ~15 seconds (set keepalives_idle lower to maintain connection)
+    # - Better for short-lived connections
+    # - NullPool: no pooling - essential for Alembic compatibility
+    connectable = create_engine(
+        url,
+        poolclass=pool.NullPool,
+        connect_args={
+            "connect_timeout": 10,
+            "keepalives": 1,
+            "keepalives_idle": 5,  # Reduced to avoid pooler baseline timeout
+        }
     )
 
-    # Execute migrations within transaction: all-or-nothing atomicity
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    try:
+        # Execute migrations within transaction: all-or-nothing atomicity
+        with connectable.connect() as connection:
+            context.configure(
+                connection=connection, target_metadata=target_metadata
+            )
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        # Ensure proper cleanup to avoid hanging on Transaction Pooler
+        connectable.dispose(close=True)
 
 
 # Route to appropriate migration mode based on context

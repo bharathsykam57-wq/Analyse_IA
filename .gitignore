@@ -61,3 +61,10 @@ backend/api/celery/tasks.py.bak
 langfuse.db
 .langfuse/
 .env.production
+
+
+check_alembic_version.py
+check_migration_status.py
+fix_alembic_history.py
+stamp_alembic_head.py
+test_db_connection.py
