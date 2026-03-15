@@ -20,10 +20,12 @@ bcrypt==4.0.1
 redis==5.2.1
 celery[redis]==5.4.0
 
-# LLM — Groq only (no Ollama in cloud)
+# LLM — Groq + Ollama support
 groq==0.37.1
 langchain
 langchain-groq
+langchain-ollama
+langchain-community
 
 # ML
 pandas==2.1.4
