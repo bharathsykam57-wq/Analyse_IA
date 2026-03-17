@@ -154,15 +154,15 @@ def store_chunks(embedded_chunks: list[dict]) -> dict:
             with conn.cursor() as cur:
                 for chunk in embedded_chunks:
                     try:
-                        # UPSERT logic: insert or skip if (source, page, chunk_index) duplicate
+                        # UPSERT logic: insert or skip if (source, page_number, chunk_index) duplicate
                         cur.execute("""
                             INSERT INTO documents
-                                (source, page, chunk_index, content, embedding)
+                                (source, page_number, chunk_index, content, embedding)
                             VALUES (%s, %s, %s, %s, %s::vector)
-                            ON CONFLICT (source, page, chunk_index) DO NOTHING
+                            ON CONFLICT DO NOTHING
                         """, (
                             chunk.get("source", "unknown"),
-                            chunk.get("page", 0),
+                            chunk.get("page_number", chunk.get("page", 0)),
                             chunk.get("chunk_index", 0),
                             chunk.get("content", ""),
                             str(chunk.get("embedding", []))
@@ -225,7 +225,7 @@ def search_similar(query_embedding: list[float], top_k: int = 5) -> dict:
             SELECT
                 id,
                 source,
-                page,
+                page_number,
                 chunk_index,
                 content,
                 1 - (embedding <=> %s) AS similarity
@@ -241,7 +241,7 @@ def search_similar(query_embedding: list[float], top_k: int = 5) -> dict:
             {
                 "id": row[0],
                 "source": row[1],
-                "page": row[2],
+                "page_number": row[2],
                 "chunk_index": row[3],
                 "content": row[4],
                 "similarity": round(float(row[5]), 4)
