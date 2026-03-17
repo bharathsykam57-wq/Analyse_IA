@@ -52,7 +52,7 @@ CORS_ORIGINS = [
 ]
 
 # Run database migrations on startup (production only)
-if IS_PRODUCTION:
+if False:
     logger.info("Running database migrations...")
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
