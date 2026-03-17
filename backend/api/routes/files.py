@@ -492,6 +492,7 @@ async def list_files(
         
         # Build file metadata object
         files.append({
+            "file_id": filename,  # Use filename as unique file identifier
             "filename": filename,
             "type": "csv" if ext == ".csv" else "pdf",  # Type detection from extension
             "size_bytes": stat.st_size,
