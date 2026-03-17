@@ -68,3 +68,26 @@ check_migration_status.py
 fix_alembic_history.py
 stamp_alembic_head.py
 test_db_connection.py
+
+# Root level
+logs.log                          
+.env.example                      
+frontend/test-axios.js            
+*.env                             
+
+# Frontend specific  
+frontend/dist/
+frontend/.env*.local             
+frontend/.eslintrc.json           
+frontend/coverage/
+
+# Root scripts (testing/debug)
+test_*.py
+test_*.sh
+
+# Environment security
+.env.local
+
+
+frontend/README.md
+frontend/API_INTEGRATION_GUIDE.md
