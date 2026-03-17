@@ -67,6 +67,12 @@ from backend.engines.analysis.dataset_loader import load_dataset
 from backend.engines.analysis.eda_engine import run_eda
 from backend.engines.analysis.automl_pipeline import run_automl
 from backend.engines.analysis.shap_explainer import explain_model
+from backend.engines.analysis.shap_visualization import (
+    shap_importance_bar,
+    shap_waterfall_plot,
+    shap_force_plot_data,
+    shap_summary_statistics
+)
 from backend.engines.analysis.anomaly_detector import detect_anomalies
 
 logger = logging.getLogger(__name__)
@@ -265,6 +271,7 @@ def run_analysis(dataset_path: str, target_column: str = None) -> dict:
     best_model = None
     metrics = {}
     top_features = []
+    shap_plots = {}  # Store SHAP visualizations
 
     if target_column and target_column in df.columns:
         logger.info(f"Stage 3/5: Running AutoML on target: {target_column}")
@@ -282,9 +289,33 @@ def run_analysis(dataset_path: str, target_column: str = None) -> dict:
                 # Shows which input variables contribute most to predictions
                 # Used for model explainability and business insights
                 logger.info("  Running SHAP explainability...")
-                shap_result = explain_model(df, target_column=target_column)
-                if shap_result.get("success"):
-                    top_features = shap_result.get("top_features", [])[:5]
+                shap_result = explain_model(automl_result, df, target_column=target_column)
+                if shap_result.get("error") is None:
+                    # Extract top features for narrative
+                    top_features = [
+                        {"feature": item["feature"], "importance": item["importance"]}
+                        for item in shap_result.get("global_importance", [])[:5]
+                    ]
+                    
+                    # Generate SHAP visualizations for frontend display
+                    logger.info("  Generating SHAP visualizations...")
+                    try:
+                        shap_plots = {
+                            "importance_bar": shap_importance_bar(shap_result.get("global_importance", [])),
+                            "summary_stats": shap_summary_statistics(shap_result.get("global_importance", []))
+                        }
+                        # Generate waterfall for first local explanation if available
+                        if shap_result.get("local_explanations"):
+                            shap_plots["waterfall"] = shap_waterfall_plot(
+                                shap_result["local_explanations"][0], 
+                                sample_index=1
+                            )
+                            shap_plots["force_data"] = shap_force_plot_data(
+                                shap_result["local_explanations"][0]
+                            )
+                    except Exception as e:
+                        logger.warning(f"  ⚠ SHAP visualization generation failed: {e}")
+                    
                     logger.info(f"  ✓ Top {len(top_features)} features identified")
         except Exception as e:
             logger.warning(f"⚠ AutoML/SHAP failed: {e} (continuing without model)")
@@ -340,6 +371,7 @@ def run_analysis(dataset_path: str, target_column: str = None) -> dict:
         "best_model": best_model,
         "metrics": metrics,
         "top_features": top_features,
+        "shap_plots": shap_plots,  # SHAP visualizations for frontend
         "anomalies": anomalies,
         "answer": answer,
         "error": None
