@@ -82,7 +82,8 @@ frontend/.eslintrc.json
 frontend/coverage/
 
 # Root scripts (testing/debug)
-test_*.py
+# Note: test_*.py files are now in tests/ directory and should be committed
+# Keep shell script pattern but root test files should not exist
 test_*.sh
 
 # Environment security
