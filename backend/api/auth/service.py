@@ -274,7 +274,7 @@ def create_access_token(user_id: UUID, email: str) -> tuple[str, int]:
     payload = {
         "sub": str(user_id),
         "email": email,
-        "exp": expire,
+        "exp": int(expire.timestamp()),  # Convert datetime to Unix timestamp (int)
         "type": "access",
     }
     token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
