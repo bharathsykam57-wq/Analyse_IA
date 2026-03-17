@@ -43,7 +43,9 @@ config = context.config
 
 # Override database URL from environment variable (.env)
 # Allows migrations to use DATABASE_URL from environment instead of hardcoded alembic.ini
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", ""))
+# IMPORTANT: ConfigParser uses % for interpolation, so URL-encoded % (like %3F) must be escaped as %%
+database_url = os.getenv("DATABASE_URL", "").replace("%", "%%")
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Configure logging from alembic.ini [loggers] section
 if config.config_file_name is not None:
