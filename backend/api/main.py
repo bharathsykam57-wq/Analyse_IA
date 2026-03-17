@@ -23,6 +23,8 @@ from contextlib import asynccontextmanager
 import logging
 import time
 import os
+import sys
+import subprocess
 from dotenv import load_dotenv
 from backend.api.routes.health import router as health_router
 from backend.api.auth.router import router as auth_router
@@ -48,6 +50,21 @@ CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 ]
+
+# Run database migrations on startup (production only)
+if IS_PRODUCTION:
+    logger.info("Running database migrations...")
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    if result.returncode != 0:
+        logger.error(f"Database migration failed: {result.stderr}")
+        sys.exit(1)
+    else:
+        logger.info(f"Database migrations completed: {result.stdout}")
 
 
 @asynccontextmanager
