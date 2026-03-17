@@ -87,7 +87,41 @@ test_*.sh
 
 # Environment security
 .env.local
+.env.production
 
+# macOS system files (global across all directories)
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
 
-frontend/README.md
-frontend/API_INTEGRATION_GUIDE.md
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Type checking and linting caches
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Frontend production build
+frontend/dist/
+
+# IDE specific
+.env.vault
+.env.test.local
+
+# Optional - if using these tools
+poetry.lock
+Pipfile.lock
+
+# Test data/fixtures generated at runtime
+test_data/
+fixtures/
+.pytest_tmp/
+
+# OS specific
+Thumbs.db
