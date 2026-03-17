@@ -2,7 +2,12 @@
 """Test RAG pipeline with new documents table"""
 
 import os
+import sys
 from dotenv import load_dotenv
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 load_dotenv('.env.local')
 
 from backend.engines.rag.vector_store import store_chunks, get_document_count, search_similar

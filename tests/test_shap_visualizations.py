@@ -2,6 +2,12 @@
 """Quick test for SHAP visualization functions"""
 
 import json
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from backend.engines.analysis.shap_visualization import (
     shap_importance_bar,
     shap_waterfall_plot,
