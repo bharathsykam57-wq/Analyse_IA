@@ -98,6 +98,10 @@ test_*.sh
 
 # Testing and coverage
 .pytest_cache/
+
+# Local production documentation (development reference only)
+PRODUCTION_SETUP.md
+TASK_4_IMPLEMENTATION_GUIDE.md
 .coverage
 htmlcov/
 coverage.xml
