@@ -194,7 +194,8 @@ def run_automl(
     target_column: str,
     problem_type: Optional[str] = None,
     max_models: int = 5,
-    sample_size: int = 5000
+    sample_size: int = 5000,
+    enable_tuning: bool = True,
 ) -> dict:
     """Run complete AutoML pipeline to train and select best model.
 
@@ -252,8 +253,16 @@ def run_automl(
     """
     result = {
         'best_model': None,
+        'base_model': None,
+        'tuned_model': None,
         'best_model_name': None,
+        'base_model_name': None,
+        'tuned_model_name': None,
         'metrics': {},
+        'base_metrics': {},
+        'tuned_metrics': {},
+        'tuning_applied': False,
+        'tuning_error': None,
         'comparison': None,
         'problem_type': None,
         'features_used': [],
@@ -313,7 +322,7 @@ def run_automl(
             # Import regression-specific functions from PyCaret
             from pycaret.regression import (
                 setup, compare_models, pull,
-                finalize_model, get_config
+                tune_model
             )
 
             # Setup PyCaret environment (preprocessing, train/test split, etc.)
@@ -334,18 +343,35 @@ def run_automl(
 
             # Extract comparison results and format metrics
             comparison_df = pull()
-            metrics = {
+            base_metrics = {
                 'R2': round(float(comparison_df.iloc[0]['R2']), 4),      # Coefficient of determination
                 'MAE': round(float(comparison_df.iloc[0]['MAE']), 4),    # Mean Absolute Error
                 'RMSE': round(float(comparison_df.iloc[0]['RMSE']), 4),  # Root Mean Squared Error
                 'MAPE': round(float(comparison_df.iloc[0]['MAPE']), 4),  # Mean Absolute Percentage Error
             }
 
+            tuned_model = None
+            tuned_metrics = {}
+            tuning_error = None
+            if enable_tuning:
+                try:
+                    tuned_model = tune_model(best_model, verbose=False)
+                    tuned_pull = pull()
+                    tuned_metrics = {
+                        'R2': round(float(tuned_pull.iloc[0]['R2']), 4),
+                        'MAE': round(float(tuned_pull.iloc[0]['MAE']), 4),
+                        'RMSE': round(float(tuned_pull.iloc[0]['RMSE']), 4),
+                        'MAPE': round(float(tuned_pull.iloc[0]['MAPE']), 4),
+                    }
+                except Exception as tune_exc:
+                    tuning_error = str(tune_exc)
+                    logger.warning(f"AutoML tuning failed, using base model: {tuning_error}")
+
         else:  # classification branch
             # Import classification-specific functions from PyCaret
             from pycaret.classification import (
                 setup, compare_models, pull,
-                finalize_model, get_config
+                tune_model
             )
 
             # Setup PyCaret environment with classification settings
@@ -366,7 +392,7 @@ def run_automl(
 
             # Extract comparison results and format classification-specific metrics
             comparison_df = pull()
-            metrics = {
+            base_metrics = {
                 'Accuracy': round(float(comparison_df.iloc[0]['Accuracy']), 4),  # Overall correctness
                 'AUC': round(float(comparison_df.iloc[0].get('AUC', 0)), 4),      # Area under ROC curve (not always available)
                 'F1': round(float(comparison_df.iloc[0]['F1']), 4),               # Harmonic mean of precision and recall
@@ -374,20 +400,50 @@ def run_automl(
                 'Recall': round(float(comparison_df.iloc[0]['Recall']), 4),       # True positives / (TP + FN)
             }
 
+            tuned_model = None
+            tuned_metrics = {}
+            tuning_error = None
+            if enable_tuning:
+                try:
+                    tuned_model = tune_model(best_model, verbose=False)
+                    tuned_pull = pull()
+                    tuned_metrics = {
+                        'Accuracy': round(float(tuned_pull.iloc[0]['Accuracy']), 4),
+                        'AUC': round(float(tuned_pull.iloc[0].get('AUC', 0)), 4),
+                        'F1': round(float(tuned_pull.iloc[0]['F1']), 4),
+                        'Precision': round(float(tuned_pull.iloc[0]['Prec.']), 4),
+                        'Recall': round(float(tuned_pull.iloc[0]['Recall']), 4),
+                    }
+                except Exception as tune_exc:
+                    tuning_error = str(tune_exc)
+                    logger.warning(f"AutoML tuning failed, using base model: {tuning_error}")
+
         # STEP 5: Extract model metadata and compile final result
         # Get the algorithm name from the model's class (e.g., 'RandomForestRegressor')
-        best_model_name = type(best_model).__name__
+        base_model_name = type(best_model).__name__
+
+        selected_model = tuned_model if tuned_model is not None else best_model
+        selected_metrics = tuned_metrics if tuned_metrics else base_metrics
+        selected_model_name = type(selected_model).__name__
 
         # Populate result dictionary with all training outputs
-        result['best_model'] = best_model
-        result['best_model_name'] = best_model_name
-        result['metrics'] = metrics
-        result['comparison'] = comparison_df.head(max_models).to_dict()  # Top N models for comparison
+        result['base_model'] = best_model
+        result['base_model_name'] = base_model_name
+        result['tuned_model'] = tuned_model
+        result['tuned_model_name'] = type(tuned_model).__name__ if tuned_model is not None else None
+        result['best_model'] = selected_model
+        result['best_model_name'] = selected_model_name
+        result['base_metrics'] = base_metrics
+        result['tuned_metrics'] = tuned_metrics
+        result['metrics'] = selected_metrics
+        result['tuning_applied'] = tuned_model is not None
+        result['tuning_error'] = tuning_error
+        result['comparison'] = comparison_df.head(max_models).to_dict('records')  # Top N models for comparison
 
         # Log successful completion with summary metrics
         logger.info(
-            f"AutoML complete. Best model: {best_model_name} | "
-            f"Metrics: {metrics}"
+            f"AutoML complete. Best model: {selected_model_name} | "
+            f"Tuned: {result['tuning_applied']} | Metrics: {selected_metrics}"
         )
 
         return result
