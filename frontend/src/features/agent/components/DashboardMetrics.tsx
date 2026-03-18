@@ -16,7 +16,38 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
   const anomalies = data?.anomalies || { high: 0, medium: 0, low: 0, total: 0, percentage: 0 };
   const best_model = data?.best_model || data?.model || "N/A";
   const metrics = data?.metrics || {};
+  const baseMetrics = data?.base_metrics || {};
+  const tunedMetrics = data?.tuned_metrics || {};
+  const tuningApplied = Boolean(data?.tuning_applied);
+  const baseModelName = data?.base_model_name;
+  const comparison = data?.comparison || [];
   const top_features = data?.top_features || [];
+
+  const pickMetric = (bucket: Record<string, number>, keys: string[]) => {
+    for (const key of keys) {
+      const value = bucket?.[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+    return undefined;
+  };
+
+  const selectedScore =
+    pickMetric(metrics, ["Accuracy", "accuracy", "R2", "r2", "AUC", "auc", "F1", "f1"]) ?? 0;
+  const selectedMetricLabel =
+    pickMetric(metrics, ["Accuracy", "accuracy"]) !== undefined
+      ? "Accuracy"
+      : pickMetric(metrics, ["R2", "r2"]) !== undefined
+      ? "R²"
+      : pickMetric(metrics, ["AUC", "auc"]) !== undefined
+      ? "AUC"
+      : pickMetric(metrics, ["F1", "f1"]) !== undefined
+      ? "F1"
+      : "Score";
+
+  const baseScore = pickMetric(baseMetrics, ["Accuracy", "accuracy", "R2", "r2"]);
+  const tunedScore = pickMetric(tunedMetrics, ["Accuracy", "accuracy", "R2", "r2"]);
   
   const StatCard = ({ title, value, subtitle, icon: Icon, colorClass }: any) => (
     <Card className={cn("border-border/50 bg-black/20 backdrop-blur-sm group hover:-translate-y-1 hover:shadow-lg hover:shadow-blue-900/20 hover:border-blue-500/30 transition-all duration-300 cursor-default", className)}>
@@ -46,7 +77,11 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
         <StatCard
           title="Modèle Optimal"
           value={best_model}
-          subtitle={`Sélectionné via Auto-ML`}
+          subtitle={
+            tuningApplied
+              ? `Tuning appliqué${baseModelName ? ` (base: ${baseModelName})` : ""}`
+              : `Sélectionné via Auto-ML`
+          }
           icon={Activity}
           colorClass="bg-blue-500/10 text-blue-500"
         />
@@ -66,12 +101,25 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
         />
         <StatCard
           title="Performance"
-          value={((metrics?.accuracy || 0) * 100).toFixed(1) + "%"}
-          subtitle="Précision globale (Accuracy)"
+          value={(selectedScore * 100).toFixed(1) + "%"}
+          subtitle={`Métrique principale (${selectedMetricLabel})`}
           icon={TrendingUp}
           colorClass="bg-indigo-500/10 text-indigo-500"
         />
       </div>
+
+      {(baseScore !== undefined || tunedScore !== undefined || comparison.length > 0) && (
+        <Card className="border-border/50 bg-black/20">
+          <CardHeader className="pb-2 text-white">
+            <CardTitle className="text-lg">AutoML — Base vs Tuned</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-2 text-sm text-gray-300 space-y-2">
+            {baseScore !== undefined && <p>Base score: {(baseScore * 100).toFixed(1)}%</p>}
+            {tunedScore !== undefined && <p>Tuned score: {(tunedScore * 100).toFixed(1)}%</p>}
+            {comparison.length > 0 && <p>Modèles comparés: {comparison.length}</p>}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* 2. Feature Importance Chart (Mocked UI visualization) */}

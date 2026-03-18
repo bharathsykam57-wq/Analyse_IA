@@ -14,13 +14,20 @@ export interface BackendAnomalies {
 }
   
 export interface AnalysisResult {
-    model: string;
-    best_model: string;
-    rows: number;
-    columns: number;
-    anomalies: BackendAnomalies;
-    metrics: Record<string, number>;
-    top_features: TopFeature[];
+  model?: string;
+  best_model?: string;
+  base_model_name?: string;
+  tuned_model_name?: string;
+  rows?: number;
+  columns?: number;
+  anomalies?: BackendAnomalies;
+  metrics?: Record<string, number>;
+  base_metrics?: Record<string, number>;
+  tuned_metrics?: Record<string, number>;
+  tuning_applied?: boolean;
+  tuning_error?: string | null;
+  top_features?: TopFeature[];
+  comparison?: Array<Record<string, string | number | null>>;
 }
   
 export interface BackendResult {
