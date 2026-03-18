@@ -21,6 +21,7 @@ DDL_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON public.refresh_tokens (user_id)",
     "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_expires_at ON public.refresh_tokens (expires_at)",
     "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_revoked_expires_at ON public.refresh_tokens (revoked, expires_at)",
+    "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_revoked_created_at ON public.refresh_tokens (revoked, created_at)",
     "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id_revoked ON public.refresh_tokens (user_id, revoked)",
 ]
 

@@ -23,6 +23,7 @@ EXPECTED_INDEXES = {
     "ix_refresh_tokens_user_id",
     "ix_refresh_tokens_expires_at",
     "ix_refresh_tokens_revoked_expires_at",
+    "ix_refresh_tokens_revoked_created_at",
     "ix_refresh_tokens_user_id_revoked",
 }
 
