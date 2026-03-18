@@ -50,6 +50,7 @@ from typing import Generator
 from dotenv import load_dotenv
 import os
 import logging
+from urllib.parse import urlparse
 
 # Load environment variables from .env BEFORE any os.getenv() calls
 # This must happen at module import time, not deferred to main.py
@@ -65,6 +66,15 @@ if not DATABASE_URL:
     logger.warning(
         "DATABASE_URL not set. Please set DATABASE_URL environment variable. "
         "Example: postgresql://user:password@localhost:5432/analyse_ia"
+    )
+else:
+    parsed_db_url = urlparse(DATABASE_URL)
+    logger.info(
+        "Database config loaded: user=%s host=%s port=%s db=%s",
+        parsed_db_url.username,
+        parsed_db_url.hostname,
+        parsed_db_url.port,
+        parsed_db_url.path.lstrip("/"),
     )
 
 # SQLAlchemy Engine Configuration
