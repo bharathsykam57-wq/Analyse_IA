@@ -1,0 +1,69 @@
+groups:
+  - name: analyseia-service-alerts
+    interval: 30s
+    rules:
+      - alert: AnalyseIAServiceDown
+        expr: analyseia_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: analyseia
+        annotations:
+          summary: "Analyse_IA service is down"
+          description: "Metric analyseia_up is 0 for more than 1 minute."
+
+      - alert: AnalyseIAHighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(analyseia_http_requests_total{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(analyseia_http_requests_total[5m])), 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: analyseia
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "HTTP 5xx ratio is above 5% for 5 minutes."
+
+      - alert: AnalyseIAHighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(analyseia_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: analyseia
+        annotations:
+          summary: "High API latency (p95)"
+          description: "HTTP p95 latency is above 2 seconds for 10 minutes."
+
+  - name: analyseia-celery-alerts
+    interval: 30s
+    rules:
+      - alert: AnalyseIACeleryFailureSpike
+        expr: sum(rate(analyseia_celery_task_events_total{status="failed"}[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          service: analyseia
+        annotations:
+          summary: "Celery failures detected"
+          description: "Celery failed task event rate is above threshold for 10 minutes."
+
+      - alert: AnalyseIACelerySlowTasksP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(analyseia_celery_task_duration_seconds_bucket[10m]))
+          ) > 120
+        for: 15m
+        labels:
+          severity: warning
+          service: analyseia
+        annotations:
+          summary: "Celery task duration p95 too high"
+          description: "Task duration p95 exceeds 120 seconds over 15 minutes."

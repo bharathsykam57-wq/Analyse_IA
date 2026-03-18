@@ -143,6 +143,9 @@ echo ""
 echo -e "${YELLOW}6. (If needed) Index Backfill Safety Run:${NC}"
 echo "   python scripts/backfill_refresh_token_indexes.py --env-file .env.production"
 echo ""
+echo -e "${YELLOW}7. Monitoring Smoke Checks:${NC}"
+echo "   ./tests/run_monitoring_checks.sh --backend-url https://your-backend.railway.app"
+echo ""
 
 # Summary
 echo ""
