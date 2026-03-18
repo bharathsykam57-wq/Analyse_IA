@@ -65,7 +65,7 @@ export function truncateText(text: string, maxLength: number): string {
 /**
  * Generate CSV from array of objects
  */
-export function generateCSV<T extends Record<string, any>>(
+export function generateCSV<T extends Record<string, unknown>>(
   data: T[],
   filename: string
 ): void {
@@ -301,7 +301,7 @@ export function getErrorMessage(error: unknown): string {
     return error;
   }
   if (typeof error === "object" && error !== null && "message" in error) {
-    return String((error as any).message);
+    return String((error as { message?: unknown }).message);
   }
   return "Une erreur s'est produite";
 }

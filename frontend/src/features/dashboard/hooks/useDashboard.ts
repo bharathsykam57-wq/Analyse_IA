@@ -102,7 +102,7 @@ export function useApiKeys() {
 /**
  * Hook for managing form state with auto-save
  */
-export function useAutoSaveForm<T extends Record<string, any>>(
+export function useAutoSaveForm<T extends Record<string, unknown>>(
   initialValues: T,
   onSave: (values: T) => Promise<void>,
   debounceMs = 1000
@@ -170,7 +170,7 @@ export function useModal() {
  */
 export function useAnalytics() {
   const trackEvent = useCallback(
-    (eventName: string, data?: Record<string, any>) => {
+    (eventName: string, data?: Record<string, unknown>) => {
       analyticsApi.trackEvent(eventName, data);
     },
     []

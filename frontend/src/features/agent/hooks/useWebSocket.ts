@@ -6,7 +6,7 @@ import { BackendResult } from "@/shared/types/agent";
 interface WebSocketMessage {
   type: "started" | "processing" | "progress" | "result" | "error";
   message?: string;
-  data?: any;
+  data?: BackendResult;
   error?: string;
 }
 
@@ -64,7 +64,7 @@ export function useWebSocket(
       return;
     }
 
-    try {
+    const openSocket = () => {
       const wsUrl = `${getApiUrl()}/ws/${taskId}?token=${token}`;
       wsRef.current = new WebSocket(wsUrl);
 
@@ -97,7 +97,7 @@ export function useWebSocket(
 
             case "result":
               setStatus("SUCCESS");
-              setResult(data.data);
+              setResult(data.data ?? null);
               setMessage(null);
               break;
 
@@ -131,7 +131,7 @@ export function useWebSocket(
 
           reconnectTimeoutRef.current = setTimeout(() => {
             console.log(`Attempting WebSocket reconnection (attempt ${reconnectAttemptsRef.current})...`);
-            connectWebSocket();
+            openSocket();
           }, backoffTime);
         } else {
           // After 3 reconnection attempts failed, fall back to polling
@@ -140,6 +140,10 @@ export function useWebSocket(
           onPollingFallback?.();
         }
       };
+    };
+
+    try {
+      openSocket();
     } catch (err) {
       console.error("Failed to create WebSocket:", err);
       setIsUsingFallback(true);
@@ -150,9 +154,12 @@ export function useWebSocket(
   useEffect(() => {
     if (!taskId) return;
 
-    connectWebSocket();
+    const initTimeout = setTimeout(() => {
+      connectWebSocket();
+    }, 0);
 
     return () => {
+      clearTimeout(initTimeout);
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }

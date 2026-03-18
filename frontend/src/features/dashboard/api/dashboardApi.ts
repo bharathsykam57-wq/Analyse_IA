@@ -1,6 +1,5 @@
 import { apiClient } from "@/shared/api/client";
 import { 
-  HistoryItem, 
   HistoryResponse, 
   HistoryFilters,
   ExportStats,
@@ -8,6 +7,20 @@ import {
   ApiKey,
   UserSettings,
 } from "@/shared/types/dashboard";
+
+interface AccountSession {
+  id: string;
+  device?: string;
+  browser?: string;
+  lastActive?: string;
+  isCurrent?: boolean;
+  ipAddress?: string;
+}
+
+type ConsentStatus = Record<string, boolean | string | number | null>;
+type FaqItem = Record<string, unknown>;
+type TutorialItem = Record<string, unknown>;
+type ApiDoc = Record<string, unknown>;
 
 /**
  * History API Functions
@@ -168,8 +181,8 @@ export const accountApi = {
     await apiClient.delete(`/api/account/api-keys/${keyId}`);
   },
 
-  async getSessions(): Promise<any[]> {
-    const response = await apiClient.get<any[]>("/api/account/sessions");
+  async getSessions(): Promise<AccountSession[]> {
+    const response = await apiClient.get<AccountSession[]>("/api/account/sessions");
     return response.data;
   },
 
@@ -199,13 +212,13 @@ export const gdprApi = {
     return response.data;
   },
 
-  async getConsentStatus(): Promise<any> {
-    const response = await apiClient.get<any>("/api/gdpr/consent");
+  async getConsentStatus(): Promise<ConsentStatus> {
+    const response = await apiClient.get<ConsentStatus>("/api/gdpr/consent");
     return response.data;
   },
 
-  async updateConsent(consent: Record<string, boolean>): Promise<any> {
-    const response = await apiClient.put<any>("/api/gdpr/consent", consent);
+  async updateConsent(consent: Record<string, boolean>): Promise<ConsentStatus> {
+    const response = await apiClient.put<ConsentStatus>("/api/gdpr/consent", consent);
     return response.data;
   },
 };
@@ -214,22 +227,26 @@ export const gdprApi = {
  * Documentation API Functions
  */
 export const docsApi = {
-  async searchFaqs(query: string): Promise<any[]> {
-    return apiClient.get("/api/docs/faq/search", {
+  async searchFaqs(query: string): Promise<FaqItem[]> {
+    const response = await apiClient.get<FaqItem[]>("/api/docs/faq/search", {
       params: { q: query },
     });
+    return response.data;
   },
 
-  async getTutorials(): Promise<any[]> {
-    return apiClient.get("/api/docs/tutorials");
+  async getTutorials(): Promise<TutorialItem[]> {
+    const response = await apiClient.get<TutorialItem[]>("/api/docs/tutorials");
+    return response.data;
   },
 
-  async getTutorial(id: string): Promise<any> {
-    return apiClient.get(`/api/docs/tutorials/${id}`);
+  async getTutorial(id: string): Promise<TutorialItem> {
+    const response = await apiClient.get<TutorialItem>(`/api/docs/tutorials/${id}`);
+    return response.data;
   },
 
-  async getApiDocumentation(): Promise<any> {
-    return apiClient.get("/api/docs/api");
+  async getApiDocumentation(): Promise<ApiDoc> {
+    const response = await apiClient.get<ApiDoc>("/api/docs/api");
+    return response.data;
   },
 };
 
@@ -237,7 +254,7 @@ export const docsApi = {
  * Analytics API Functions
  */
 export const analyticsApi = {
-  async trackEvent(eventName: string, data?: Record<string, any>): Promise<void> {
+  async trackEvent(eventName: string, data?: Record<string, unknown>): Promise<void> {
     // Don't await, just fire and forget
     apiClient.post("/api/analytics/events", { event: eventName, data });
   },
@@ -247,7 +264,7 @@ export const analyticsApi = {
   },
 };
 
-export default {
+const dashboardApi = {
   history: historyApi,
   exports: exportsApi,
   settings: settingsApi,
@@ -256,3 +273,5 @@ export default {
   docs: docsApi,
   analytics: analyticsApi,
 };
+
+export default dashboardApi;
