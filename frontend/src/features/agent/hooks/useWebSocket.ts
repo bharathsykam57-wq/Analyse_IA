@@ -4,10 +4,19 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { BackendResult } from "@/shared/types/agent";
 
 interface WebSocketMessage {
-  type: "started" | "processing" | "progress" | "result" | "error";
+  type?: "started" | "processing" | "progress" | "result" | "error";
+  status?: "started" | "processing" | "retrying" | "completed" | "failed";
+  task_id?: string;
   message?: string;
   data?: BackendResult;
+  result?: BackendResult | BackendResult["result"];
   error?: string;
+  error_code?: string;
+  retry?: {
+    attempt: number;
+    max_retries: number;
+    will_retry: boolean;
+  };
 }
 
 interface UseWebSocketReturn {
@@ -79,10 +88,26 @@ export function useWebSocket(
         try {
           const data: WebSocketMessage = JSON.parse(event.data);
 
-          switch (data.type) {
+          const normalizedType = data.type ?? (() => {
+            switch (data.status) {
+              case "started":
+                return "started";
+              case "processing":
+              case "retrying":
+                return "progress";
+              case "completed":
+                return "result";
+              case "failed":
+                return "error";
+              default:
+                return undefined;
+            }
+          })();
+
+          switch (normalizedType) {
             case "started":
               setStatus("STARTED");
-              setMessage("Task started");
+              setMessage(data.message || "Task started");
               break;
 
             case "processing":
@@ -92,22 +117,48 @@ export function useWebSocket(
 
             case "progress":
               setStatus("PROCESSING");
-              setMessage(data.message || "In progress...");
+              if (data.status === "retrying" && data.retry) {
+                setMessage(
+                  `${data.message || "Retrying task"} (${data.retry.attempt}/${data.retry.max_retries})`
+                );
+              } else {
+                setMessage(data.message || "In progress...");
+              }
               break;
 
             case "result":
               setStatus("SUCCESS");
-              setResult(data.data ?? null);
+              {
+                const resultPayload = data.data ?? data.result;
+                if (
+                  resultPayload &&
+                  typeof resultPayload === "object" &&
+                  "task_id" in (resultPayload as Record<string, unknown>) &&
+                  "status" in (resultPayload as Record<string, unknown>)
+                ) {
+                  setResult(resultPayload as BackendResult);
+                } else {
+                  setResult({
+                    task_id: taskId,
+                    status: "SUCCESS",
+                    result: (resultPayload ?? undefined) as BackendResult["result"],
+                  });
+                }
+              }
               setMessage(null);
               break;
 
             case "error":
               setStatus("FAILURE");
-              setError(data.error || "Task failed");
+              setError(
+                data.error_code
+                  ? `${data.error || "Task failed"} (${data.error_code})`
+                  : (data.error || "Task failed")
+              );
               break;
 
             default:
-              console.warn("Unknown WebSocket message type:", data.type);
+              console.warn("Unknown WebSocket message envelope:", data);
           }
         } catch (err) {
           console.error("Failed to parse WebSocket message:", err);
