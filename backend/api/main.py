@@ -96,18 +96,18 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests with timing for debugging and monitoring."""
-    start_time = time.time()
+    # Temporarily disabled for debugging
+    # start_time = time.time()
     response = await call_next(request)
-    process_time_ms = (time.time() - start_time) * 1000
+    # process_time_ms = (time.time() - start_time) * 1000
 
-    logger.info(
-        f"{request.method} {request.url.path} "
-        f"→ {response.status_code} "
-        f"({process_time_ms:.2f}ms)"
-    )
+    # logger.info(
+    #     f"{request.method} {request.url.path} "
+    #     f"→ {response.status_code} "
+    # )
 
     # Expose timing to client (debugging, monitoring)
-    response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
+    # response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
     return response
 
 
