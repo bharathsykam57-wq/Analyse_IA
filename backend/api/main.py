@@ -123,10 +123,4 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/")
 async def root():
-    return {
-        "app": "Analyse_IA",
-        "version": "0.5.0",
-        "status": "running",
-        "environment": ENVIRONMENT,
-        "phase": 5,
-    }
+    return {"status": "ok"}
