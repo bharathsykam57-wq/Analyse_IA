@@ -217,13 +217,15 @@ def publish_progress(task_id: str, data: dict):
         - No sensitive data in progress messages
         - Error details redacted in client messages
     """
+    payload = _normalize_progress_payload(task_id, data)
     try:
-        payload = _normalize_progress_payload(task_id, data)
         r = redis.from_url(REDIS_URL)
         r.publish(f"task:{task_id}", json.dumps(payload))
-        _send_task_status_webhook(payload)
     except Exception as e:
         logger.warning(f"Failed to publish progress for task {task_id}: {e}")
+
+    # Webhook dispatch is intentionally independent from Redis availability.
+    _send_task_status_webhook(payload)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
