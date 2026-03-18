@@ -25,7 +25,6 @@ import httpx
 import json
 import time
 import logging
-from datetime import datetime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,16 +67,16 @@ class ProductionCeleryTester:
         try:
             # Submit a simple analysis task
             response = self.client.post(
-                f"{self.backend_url}/api/v1/agent/chat",
+                f"{self.backend_url}/api/v1/agent/ask",
                 json={
                     "query": "Show me basic statistics about churn rates",
-                    "files": [],
+                    "language": "en",
                 },
             )
             
             self.log_response("Task Submission", response)
             
-            if response.status_code == 200:
+            if response.status_code == 202:
                 data = response.json()
                 task_id = data.get("task_id") or data.get("message_id")
                 
@@ -125,11 +124,11 @@ class ProductionCeleryTester:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    status = data.get("status") or data.get("state")
+                    status = (data.get("status") or data.get("state") or "").upper()
                     
                     logger.info(f"    Attempt {retry_count + 1}: {status}")
                     
-                    if status in ("completed", "success", "done"):
+                    if status in ("SUCCESS",):
                         logger.info(f"  ✓ Task completed successfully")
                         
                         result = data.get("result") or data.get("data")
@@ -138,11 +137,11 @@ class ProductionCeleryTester:
                         
                         self.results.append(("Task Status", "PASS"))
                         return True
-                    elif status in ("failed", "error"):
+                    elif status in ("FAILURE",):
                         logger.error(f"  ✗ Task failed: {data.get('error')}")
                         self.results.append(("Task Status", "FAIL"))
                         return False
-                    elif status in ("pending", "processing"):
+                    elif status in ("PENDING", "STARTED", "RETRY", "RETRYING", "PROCESSING"):
                         logger.info(f"    → Still processing, retrying...")
                         time.sleep(2)
                         retry_count += 1
@@ -179,14 +178,14 @@ class ProductionCeleryTester:
             for queue_type, query in task_types:
                 try:
                     response = self.client.post(
-                        f"{self.backend_url}/api/v1/agent/chat",
+                        f"{self.backend_url}/api/v1/agent/ask",
                         json={
                             "query": query,
-                            "files": [],
+                            "language": "en",
                         },
                     )
                     
-                    if response.status_code == 200:
+                    if response.status_code == 202:
                         data = response.json()
                         task_id = data.get("task_id") or data.get("message_id")
                         if task_id:
@@ -220,14 +219,14 @@ class ProductionCeleryTester:
             for i in range(5):
                 try:
                     response = self.client.post(
-                        f"{self.backend_url}/api/v1/agent/chat",
+                        f"{self.backend_url}/api/v1/agent/ask",
                         json={
                             "query": f"Quick analysis #{i}",
-                            "files": [],
+                            "language": "en",
                         },
                     )
                     
-                    if response.status_code == 200:
+                    if response.status_code == 202:
                         tasks_submitted += 1
                     elif response.status_code == 429:  # Rate limited
                         logger.warning(f"  ⚠ Rate limit hit at task {i}")
@@ -315,8 +314,18 @@ def main():
     )
     parser.add_argument(
         "--auth-token",
-        required=True,
+        required=False,
         help="JWT access token (get from test_production_auth.py)"
+    )
+    parser.add_argument(
+        "--email",
+        required=False,
+        help="Email for auto-login if --auth-token is not provided"
+    )
+    parser.add_argument(
+        "--password",
+        required=False,
+        help="Password for auto-login if --auth-token is not provided"
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -326,9 +335,32 @@ def main():
     
     args = parser.parse_args()
     
+    access_token = args.auth_token or os.getenv("AUTH_TOKEN")
+
+    if not access_token:
+        email = args.email or f"celery_test_{int(time.time())}@example.com"
+        password = args.password or "SecureTestPassword123!"
+        with httpx.Client(timeout=20.0, verify=True) as auth_client:
+            auth_client.post(
+                f"{args.backend_url.rstrip('/')}/api/v1/auth/register",
+                json={"email": email, "password": password},
+            )
+            login_response = auth_client.post(
+                f"{args.backend_url.rstrip('/')}/api/v1/auth/login",
+                json={"email": email, "password": password},
+            )
+            if login_response.status_code != 200:
+                logger.error(f"Auto-login failed: {login_response.status_code} {login_response.text}")
+                sys.exit(1)
+            access_token = (login_response.json().get("tokens") or {}).get("access_token")
+
+    if not access_token:
+        logger.error("No access token available. Provide --auth-token or valid --email/--password")
+        sys.exit(1)
+
     tester = ProductionCeleryTester(
         args.backend_url,
-        args.auth_token,
+        access_token,
         verbose=args.verbose
     )
     success = tester.run_all_tests()
