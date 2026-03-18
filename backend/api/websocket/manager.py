@@ -122,7 +122,26 @@ class ConnectionManager:
                 if message["type"] != "message":
                     continue
 
-                data = json.loads(message["data"])
+                try:
+                    raw_data = message["data"]
+                    data = json.loads(raw_data)
+                    if not isinstance(data, dict):
+                        data = {
+                            "status": "processing",
+                            "type": "progress",
+                            "task_id": task_id,
+                            "message": str(data),
+                        }
+                except Exception as decode_err:
+                    logger.warning(f"Invalid pubsub payload for {task_id}: {decode_err}")
+                    data = {
+                        "status": "failed",
+                        "type": "error",
+                        "task_id": task_id,
+                        "error": "Invalid task progress payload",
+                        "error_code": "progress_payload_invalid",
+                    }
+
                 await websocket.send_json(data)
                 logger.debug(f"Streamed to {task_id}: {data.get('status')}")
 

@@ -97,6 +97,25 @@ logger = logging.getLogger(__name__)
 REDIS_URL = get_redis_url()
 
 
+def _status_to_type(status: str) -> str:
+    mapping = {
+        "started": "started",
+        "processing": "processing",
+        "retrying": "progress",
+        "completed": "result",
+        "failed": "error",
+    }
+    return mapping.get(status, "progress")
+
+
+def _normalize_progress_payload(task_id: str, data: dict) -> dict:
+    payload = {**data}
+    payload["task_id"] = task_id
+    status_value = payload.get("status", "processing")
+    payload["type"] = payload.get("type") or _status_to_type(str(status_value))
+    return payload
+
+
 def publish_progress(task_id: str, data: dict):
     """Publish task progress update to Redis Pub/Sub channel for real-time streaming.
     
@@ -147,8 +166,9 @@ def publish_progress(task_id: str, data: dict):
         - Error details redacted in client messages
     """
     try:
+        payload = _normalize_progress_payload(task_id, data)
         r = redis.from_url(REDIS_URL)
-        r.publish(f"task:{task_id}", json.dumps(data))
+        r.publish(f"task:{task_id}", json.dumps(payload))
     except Exception as e:
         logger.warning(f"Failed to publish progress for task {task_id}: {e}")
 
@@ -234,10 +254,20 @@ class LoggedTask(Task):
             - May be called multiple times if retried
         """
         logger.error(f"Task {task_id} failed: {exc}", exc_info=einfo)
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = int(getattr(self, "max_retries", 0) or 0)
+        will_retry = retries < max_retries
+
         publish_progress(task_id, {
-            "status": "failed",
+            "status": "retrying" if will_retry else "failed",
+            "message": "Task retry scheduled" if will_retry else "Task failed",
             "error": str(exc),
-            "task_id": task_id,
+            "error_code": "task_retry" if will_retry else "task_failed",
+            "retry": {
+                "attempt": retries,
+                "max_retries": max_retries,
+                "will_retry": will_retry,
+            },
         })
 
     def on_success(self, retval, task_id, args, kwargs):

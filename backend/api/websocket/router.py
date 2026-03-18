@@ -79,6 +79,7 @@ async def websocket_endpoint(
         if result.status == "SUCCESS":
             await websocket.send_json({
                 "status": "completed",
+                "type": "result",
                 "task_id": task_id,
                 "result": result.result,
             })
@@ -87,8 +88,10 @@ async def websocket_endpoint(
         if result.status == "FAILURE":
             await websocket.send_json({
                 "status": "failed",
+                "type": "error",
                 "task_id": task_id,
                 "error": str(result.result),
+                "error_code": "task_failed",
             })
             return
 
@@ -99,7 +102,13 @@ async def websocket_endpoint(
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         try:
-            await websocket.send_json({"status": "error", "detail": str(e)})
+            await websocket.send_json({
+                "status": "failed",
+                "type": "error",
+                "task_id": task_id,
+                "error": str(e),
+                "error_code": "websocket_error",
+            })
         except Exception:
             pass
     finally:
