@@ -80,6 +80,7 @@ import redis
 import json
 import os
 import time
+import requests
 from backend.monitoring.langfuse_client import trace_analysis
 from backend.monitoring.experiment_tracker import log_experiment_sync
 from backend.utils.redis_config import get_redis_url
@@ -95,6 +96,11 @@ logger = logging.getLogger(__name__)
 # Format: redis://[password@]host:port/db
 # Example: redis://localhost:6379/0 (local), redis://:secret@redis.prod:6379/1 (prod)
 REDIS_URL = get_redis_url()
+TASK_STATUS_WEBHOOK_URL = os.getenv("TASK_STATUS_WEBHOOK_URL")
+TASK_WEBHOOK_TIMEOUT_SEC = float(os.getenv("TASK_WEBHOOK_TIMEOUT_SEC", "3"))
+TASK_WEBHOOK_TOKEN = os.getenv("TASK_WEBHOOK_TOKEN")
+CELERY_DLQ_KEY = os.getenv("CELERY_DLQ_KEY", "celery:dead_letter_tasks")
+CELERY_DLQ_MAX_ITEMS = int(os.getenv("CELERY_DLQ_MAX_ITEMS", "1000"))
 
 
 def _status_to_type(status: str) -> str:
@@ -114,6 +120,52 @@ def _normalize_progress_payload(task_id: str, data: dict) -> dict:
     status_value = payload.get("status", "processing")
     payload["type"] = payload.get("type") or _status_to_type(str(status_value))
     return payload
+
+
+def _send_task_status_webhook(payload: dict):
+    """Send task status payload to optional webhook endpoint.
+
+    This is non-blocking from a reliability perspective: failures are logged,
+    never raised, and therefore cannot break task execution.
+    """
+    if not TASK_STATUS_WEBHOOK_URL:
+        return
+
+    headers = {"Content-Type": "application/json"}
+    if TASK_WEBHOOK_TOKEN:
+        headers["Authorization"] = f"Bearer {TASK_WEBHOOK_TOKEN}"
+
+    try:
+        response = requests.post(
+            TASK_STATUS_WEBHOOK_URL,
+            json=payload,
+            headers=headers,
+            timeout=TASK_WEBHOOK_TIMEOUT_SEC,
+        )
+        if response.status_code >= 400:
+            logger.warning(
+                f"Task webhook returned HTTP {response.status_code} for task {payload.get('task_id')}"
+            )
+    except Exception as webhook_err:
+        logger.warning(f"Failed to send task webhook for {payload.get('task_id')}: {webhook_err}")
+
+
+def _push_dead_letter(task_id: str, payload: dict):
+    """Persist terminal task failures in a Redis dead-letter list for ops review."""
+    try:
+        r = redis.from_url(REDIS_URL)
+        dlq_record = {
+            "task_id": task_id,
+            "status": payload.get("status"),
+            "error": payload.get("error"),
+            "error_code": payload.get("error_code"),
+            "retry": payload.get("retry"),
+            "timestamp": int(time.time()),
+        }
+        r.lpush(CELERY_DLQ_KEY, json.dumps(dlq_record))
+        r.ltrim(CELERY_DLQ_KEY, 0, max(CELERY_DLQ_MAX_ITEMS - 1, 0))
+    except Exception as dlq_err:
+        logger.warning(f"Failed to push task {task_id} to dead-letter queue: {dlq_err}")
 
 
 def publish_progress(task_id: str, data: dict):
@@ -169,6 +221,7 @@ def publish_progress(task_id: str, data: dict):
         payload = _normalize_progress_payload(task_id, data)
         r = redis.from_url(REDIS_URL)
         r.publish(f"task:{task_id}", json.dumps(payload))
+        _send_task_status_webhook(payload)
     except Exception as e:
         logger.warning(f"Failed to publish progress for task {task_id}: {e}")
 
@@ -269,6 +322,18 @@ class LoggedTask(Task):
                 "will_retry": will_retry,
             },
         })
+
+        if not will_retry:
+            _push_dead_letter(task_id, {
+                "status": "failed",
+                "error": str(exc),
+                "error_code": "task_failed",
+                "retry": {
+                    "attempt": retries,
+                    "max_retries": max_retries,
+                    "will_retry": False,
+                },
+            })
 
     def on_success(self, retval, task_id, args, kwargs):
         """Called automatically when task completes successfully.
