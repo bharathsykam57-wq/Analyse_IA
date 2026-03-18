@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatMessage, BackendResult } from '@/shared/types/agent';
+import { ChatMessage } from '@/shared/types/agent';
 
 interface ChatState {
   language: 'fr' | 'en';

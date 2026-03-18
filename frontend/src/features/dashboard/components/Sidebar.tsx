@@ -40,7 +40,7 @@ interface NavSection {
 export function Sidebar({ className, onLinkClick }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const { language, setLanguage } = useChatStore();
+  const { language } = useChatStore();
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["main", "tools"])
   );
