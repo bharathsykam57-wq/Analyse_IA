@@ -51,8 +51,9 @@ CORS_ORIGINS = [
     for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 ]
 
-# Run database migrations on startup (production only)
-if IS_PRODUCTION:
+# Run database migrations on startup only when explicitly enabled
+RUN_STARTUP_MIGRATIONS = os.getenv("RUN_STARTUP_MIGRATIONS", "false").lower() == "true"
+if IS_PRODUCTION and RUN_STARTUP_MIGRATIONS:
     logger.info("Running database migrations...")
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -65,6 +66,8 @@ if IS_PRODUCTION:
         sys.exit(1)
     else:
         logger.info(f"Database migrations completed: {result.stdout}")
+elif IS_PRODUCTION:
+    logger.info("Startup migrations skipped (set RUN_STARTUP_MIGRATIONS=true to enable)")
 
 
 @asynccontextmanager
