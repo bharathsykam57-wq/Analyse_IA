@@ -18,7 +18,7 @@ Integration:
   Frontend receives real-time updates via: ws://host/ws/tasks/{task_id}
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -286,8 +286,8 @@ def _parse_accept_language(header: Optional[str]) -> Optional[str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 @router.get("/history")
 def get_history(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -332,6 +332,8 @@ def get_history(
             "offset": offset,
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"history": [], "total": 0, "limit": limit, "offset": offset, "error": str(e)}
+        logger.exception(f"Failed to fetch history for user_id={current_user.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch history",
+        )

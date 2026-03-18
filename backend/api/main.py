@@ -17,7 +17,9 @@ Environment:
   - Production: Docs disabled for security
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -99,18 +101,70 @@ app.add_middleware(
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests with timing for debugging and monitoring."""
     start_time = time.time()
-    response = await call_next(request)
-    process_time_ms = (time.time() - start_time) * 1000
+    try:
+        response = await call_next(request)
+        process_time_ms = (time.time() - start_time) * 1000
 
-    logger.info(
-        f"{request.method} {request.url.path} "
-        f"→ {response.status_code} "
-        f"({process_time_ms:.2f}ms)"
+        logger.info(
+            f"{request.method} {request.url.path} "
+            f"→ {response.status_code} "
+            f"({process_time_ms:.2f}ms)"
+        )
+
+        # Expose timing to client (debugging, monitoring)
+        response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
+        return response
+    except Exception as exc:
+        process_time_ms = (time.time() - start_time) * 1000
+        logger.exception(
+            f"{request.method} {request.url.path} → 500 ({process_time_ms:.2f}ms) | unhandled exception: {exc}"
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "internal_server_error",
+                "detail": "An unexpected server error occurred.",
+                "path": request.url.path,
+            },
+            headers={"X-Process-Time-Ms": f"{process_time_ms:.2f}"},
+        )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": "http_error",
+            "detail": exc.detail,
+            "path": request.url.path,
+        },
     )
 
-    # Expose timing to client (debugging, monitoring)
-    response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
-    return response
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "validation_error",
+            "detail": exc.errors(),
+            "path": request.url.path,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception(f"Unhandled exception on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_server_error",
+            "detail": "An unexpected server error occurred.",
+            "path": request.url.path,
+        },
+    )
 
 
 # Route registration (ordered by phase: auth → upload → task → stream → compliance)
