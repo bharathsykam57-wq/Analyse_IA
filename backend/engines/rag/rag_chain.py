@@ -36,13 +36,14 @@ Example usage:
 
 import logging
 import requests
+import os
 from backend.engines.rag.embedding_engine import embed_text
 from backend.engines.rag.vector_store import search_similar
 from backend.utils.language import detect_language, translate_to_french
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = "http://localhost:11434"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = "mistral-nemo:latest"
 TOP_K = 5
 MAX_CONTEXT_CHARS = 3000

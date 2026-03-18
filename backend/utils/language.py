@@ -29,9 +29,13 @@ Dependencies:
 """
 import logging
 import requests
+import os
 from langdetect import detect, LangDetectException
 
 logger = logging.getLogger(__name__)
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "mistral-nemo")
 
 
 def detect_language(text: str) -> str:
@@ -166,10 +170,10 @@ def translate_to_french(text: str) -> str:
         # POST to Ollama API running on localhost:11434
         # Endpoint: /api/chat - chat completion interface compatible with OpenAI format
         response = requests.post(
-            "http://localhost:11434/api/chat",
+            f"{OLLAMA_URL}/api/chat",
             json={
                 # Model: mistral-nemo (7.3B parameters, multilingual, fast)
-                "model": "mistral-nemo",
+                "model": OLLAMA_CHAT_MODEL,
                 # Message format: standard OpenAI chat API structure (role + content)
                 "messages": [
                     {

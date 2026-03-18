@@ -32,11 +32,12 @@ Usage:
 import logging
 import requests
 from typing import Optional
+import os
 
 logger = logging.getLogger(__name__)
 
 # Configuration: Ollama connection settings
-OLLAMA_URL = "http://localhost:11434"          # Local Ollama API endpoint
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")  # Ollama API endpoint
 EMBED_MODEL = "nomic-embed-text"               # Model name (768-dim embeddings)
 BATCH_SIZE = 10                                # Chunks per batch (tune based on available RAM)
 

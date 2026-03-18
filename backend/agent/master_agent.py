@@ -105,7 +105,7 @@ logger = logging.getLogger(__name__)
 
 # LLM Configuration
 LLM_MODEL = "mistral-nemo:latest"
-OLLAMA_URL = "http://localhost:11434"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Confidence scoring thresholds
 CONFIDENCE_HIGH = 0.90  # Strong keyword match or clear LLM classification
