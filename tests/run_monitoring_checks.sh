@@ -44,6 +44,11 @@ echo "[RUN] Local monitoring metrics smoke"
 "$PYTHON_BIN" "$ROOT_DIR/tests/test_monitoring_metrics.py"
 echo "[PASS] Local monitoring metrics smoke"
 
+echo
+echo "[RUN] MLOps bootstrap smoke"
+"$PYTHON_BIN" "$ROOT_DIR/tests/test_mlops_bootstrap.py"
+echo "[PASS] MLOps bootstrap smoke"
+
 if [[ -n "$BACKEND_URL" ]]; then
   echo
   echo "[RUN] Remote /api/v1/metrics endpoint check"

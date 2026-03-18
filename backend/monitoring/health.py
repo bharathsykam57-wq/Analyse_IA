@@ -5,6 +5,7 @@ import httpx
 import redis
 from backend.utils.redis_config import get_redis_url
 from backend.monitoring.langfuse_client import get_langfuse
+from backend.monitoring.mlflow_client import check_mlflow_status
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,12 @@ async def full_health_check():
     ollama = await check_ollama()
     redis_status = check_redis()
     langfuse_status = check_langfuse()
+    mlflow_status = check_mlflow_status()
     all_ok = (
         ollama["status"] in {"ok", "skipped"}
         and redis_status["status"] == "ok"
         and langfuse_status["status"] in {"ok", "skipped"}
+        and mlflow_status["status"] in {"ok", "skipped"}
     )
     return {
         "status": "ok" if all_ok else "degraded",
@@ -90,5 +93,6 @@ async def full_health_check():
             "ollama": ollama,
             "redis": redis_status,
             "langfuse": langfuse_status,
+            "mlflow": mlflow_status,
         },
     }
