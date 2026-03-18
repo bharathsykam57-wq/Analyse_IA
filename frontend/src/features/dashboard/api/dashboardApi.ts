@@ -17,7 +17,8 @@ interface AccountSession {
   ipAddress?: string;
 }
 
-type ConsentStatus = Record<string, boolean | string | number | null>;
+type ConsentStatus = Array<Record<string, unknown>>;
+type PersonalDataExport = Record<string, unknown>;
 type FaqItem = Record<string, unknown>;
 type TutorialItem = Record<string, unknown>;
 type ApiDoc = Record<string, unknown>;
@@ -200,25 +201,40 @@ export const accountApi = {
  * GDPR API Functions
  */
 export const gdprApi = {
-  async exportPersonalData(): Promise<Blob> {
-    const response = await apiClient.get<Blob>("/api/gdpr/export", {
-      responseType: "blob",
-    });
+  async exportPersonalData(): Promise<PersonalDataExport> {
+    const response = await apiClient.get<PersonalDataExport>("/api/rgpd/export");
     return response.data;
   },
 
   async deletePersonalData(): Promise<{ message: string }> {
-    const response = await apiClient.delete<{ message: string }>("/api/gdpr/delete");
+    const response = await apiClient.delete<{ message: string }>("/api/rgpd/erasure");
     return response.data;
   },
 
   async getConsentStatus(): Promise<ConsentStatus> {
-    const response = await apiClient.get<ConsentStatus>("/api/gdpr/consent");
+    const response = await apiClient.get<ConsentStatus>("/api/rgpd/consent");
     return response.data;
   },
 
   async updateConsent(consent: Record<string, boolean>): Promise<ConsentStatus> {
-    const response = await apiClient.put<ConsentStatus>("/api/gdpr/consent", consent);
+    const allowedPurposes = new Set([
+      "data_analysis",
+      "rag_indexing",
+      "agent_query",
+      "code_execution",
+    ]);
+
+    const entries = Object.entries(consent).filter(([purpose]) => allowedPurposes.has(purpose));
+    const updates = entries.length > 0 ? entries : [["data_analysis", true]];
+
+    for (const [purpose, granted] of updates) {
+      await apiClient.post("/api/rgpd/consent", {
+        purpose,
+        granted,
+      });
+    }
+
+    const response = await apiClient.get<ConsentStatus>("/api/rgpd/consent");
     return response.data;
   },
 };
