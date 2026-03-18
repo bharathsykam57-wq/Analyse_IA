@@ -195,7 +195,7 @@ def store_chunks(embedded_chunks: list[dict]) -> dict:
         conn.close()
 
 
-def search_similar(query_embedding: list[float], top_k: int = 5) -> dict:
+def search_similar(query_embedding: list[float], top_k: int = 5, source_filter: str | None = None) -> dict:
     """
     Find the most similar chunks to a query embedding using cosine similarity.
 
@@ -221,18 +221,33 @@ def search_similar(query_embedding: list[float], top_k: int = 5) -> dict:
         embedding_array = np.array(query_embedding, dtype=np.float32)
         cur = conn.cursor()
 
-        cur.execute("""
-            SELECT
-                id,
-                source,
-                page_number,
-                chunk_index,
-                content,
-                1 - (embedding <=> %s) AS similarity
-            FROM documents
-            ORDER BY embedding <=> %s
-            LIMIT %s
-        """, (embedding_array, embedding_array, top_k))
+        if source_filter:
+            cur.execute("""
+                SELECT
+                    id,
+                    source,
+                    page_number,
+                    chunk_index,
+                    content,
+                    1 - (embedding <=> %s) AS similarity
+                FROM documents
+                WHERE source = %s
+                ORDER BY embedding <=> %s
+                LIMIT %s
+            """, (embedding_array, source_filter, embedding_array, top_k))
+        else:
+            cur.execute("""
+                SELECT
+                    id,
+                    source,
+                    page_number,
+                    chunk_index,
+                    content,
+                    1 - (embedding <=> %s) AS similarity
+                FROM documents
+                ORDER BY embedding <=> %s
+                LIMIT %s
+            """, (embedding_array, embedding_array, top_k))
 
         rows = cur.fetchall()
         cur.close()

@@ -298,25 +298,33 @@ def classify_task(state: AgentState) -> AgentState:
 
     # Decision logic: if one category clearly leads, use that category
     scores = {"analysis": analysis_score, "rag": rag_score, "code": code_score}
-    leading = max(scores, key=scores.get)
 
-    # Check if leader has a clear lead (single unique maximum)
-    if scores[leading] > 0 and list(scores.values()).count(scores[leading]) == 1:
-        # One category has a clear lead
-        task_type = leading
-        # Get second-highest score for confidence calculation
-        other_scores = [s for k, s in scores.items() if k != leading]
-        trailing_score = max(other_scores) if other_scores else 0
-        confidence_score = calculate_confidence(scores[leading], trailing_score)
-        logger.debug(f"Keyword match: {task_type.upper()} ({scores[leading]} hits, conf={confidence_score:.2f})")
+    # Hybrid mode: if both analysis and rag intents are present and a dataset is available,
+    # run both engines and synthesize outputs.
+    if analysis_score > 0 and rag_score > 0 and code_score == 0 and bool(state.get("dataset_path")):
+        task_type = "analysis_rag"
+        confidence_score = 0.80
+        logger.debug("Hybrid keyword match: ANALYSIS+RAG")
     else:
-        # ═══════════════════════════════════════════════════════════════════════════════
-        # STAGE 2 — LLM classification (when keywords ambiguous: tied or both zero)
-        # ═══════════════════════════════════════════════════════════════════════════════
-        # Call LLM for semantic analysis since keyword matching inconclusive
-        logger.debug(f"Keywords ambiguous (analysis={analysis_score}, rag={rag_score}, code={code_score}) → using LLM")
-        task_type = _llm_classify(question)
-        confidence_score = CONFIDENCE_MEDIUM if any(s > 0 for s in scores.values()) else CONFIDENCE_LOW
+        leading = max(scores, key=scores.get)
+
+        # Check if leader has a clear lead (single unique maximum)
+        if scores[leading] > 0 and list(scores.values()).count(scores[leading]) == 1:
+            # One category has a clear lead
+            task_type = leading
+            # Get second-highest score for confidence calculation
+            other_scores = [s for k, s in scores.items() if k != leading]
+            trailing_score = max(other_scores) if other_scores else 0
+            confidence_score = calculate_confidence(scores[leading], trailing_score)
+            logger.debug(f"Keyword match: {task_type.upper()} ({scores[leading]} hits, conf={confidence_score:.2f})")
+        else:
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # STAGE 2 — LLM classification (when keywords ambiguous: tied or both zero)
+            # ═══════════════════════════════════════════════════════════════════════════════
+            # Call LLM for semantic analysis since keyword matching inconclusive
+            logger.debug(f"Keywords ambiguous (analysis={analysis_score}, rag={rag_score}, code={code_score}) → using LLM")
+            task_type = _llm_classify(question)
+            confidence_score = CONFIDENCE_MEDIUM if any(s > 0 for s in scores.values()) else CONFIDENCE_LOW
 
     logger.info(f"Task classified: {task_type} (analysis={analysis_score}, rag={rag_score}, code={code_score}, conf={confidence_score:.2f})")
 
@@ -500,7 +508,7 @@ def run_rag_node(state: AgentState) -> AgentState:
         logger.info("No documents indexed yet for RAG search")
 
     # EXECUTE: Call Phase 2 RAG tool (blocks 5-35 seconds)
-    result = ask_document(question)
+    result = ask_document(question, pdf_source=state.get("pdf_source"))
 
     # RESULT HANDLING: Check tool success flag
     if not result["success"]:
@@ -599,6 +607,61 @@ Demande: {question}"""
     }
 
 
+def run_analysis_rag_node(state: AgentState) -> AgentState:
+    """NODE 2d: Execute analysis then RAG, and synthesize both outputs."""
+    logger.info("Running hybrid analysis+RAG flow")
+
+    analysis_state = run_analysis_node(state)
+    rag_state = run_rag_node(state)
+
+    analysis_answer = analysis_state.get("answer") if not analysis_state.get("error") else None
+    rag_answer = rag_state.get("answer") if not rag_state.get("error") else None
+
+    if analysis_answer and rag_answer:
+        language = state.get("language", "fr")
+        if language == "en":
+            merged_answer = (
+                "## Data analysis insights\n"
+                f"{analysis_answer}\n\n"
+                "## Document insights\n"
+                f"{rag_answer}"
+            )
+        else:
+            merged_answer = (
+                "## Insights d'analyse de données\n"
+                f"{analysis_answer}\n\n"
+                "## Insights documentaires\n"
+                f"{rag_answer}"
+            )
+        combined_error = None
+    elif analysis_answer:
+        merged_answer = analysis_answer
+        combined_error = rag_state.get("error")
+    elif rag_answer:
+        merged_answer = rag_answer
+        combined_error = analysis_state.get("error")
+    else:
+        merged_answer = (
+            f"Analyse: {analysis_state.get('error', 'failed')}\n"
+            f"RAG: {rag_state.get('error', 'failed')}"
+        )
+        combined_error = "analysis_and_rag_failed"
+
+    return {
+        **state,
+        "task_type": "analysis_rag",
+        "result": {
+            "analysis_result": analysis_state.get("result"),
+            "rag_result": rag_state.get("result"),
+        },
+        "answer": merged_answer,
+        "error": combined_error,
+        "steps_taken": state.get("steps_taken", []) + [
+            "analysis_rag → success" if not combined_error else "analysis_rag → partial_or_failed"
+        ],
+    }
+
+
 # ═══════════════════════════════════════════
 # NODE 3 — Format final answer
 # ═══════════════════════════════════════════
@@ -627,9 +690,13 @@ def format_answer(state: AgentState) -> AgentState:
     language = state.get("language", "fr")
 
     # POST-PROCESS RAG ANSWERS: Add source citations
-    if task_type == "rag" and result:
-        # Extract sources list from tool result
-        sources = result.get("sources", [])
+    if task_type in {"rag", "analysis_rag"} and result:
+        if task_type == "analysis_rag":
+            rag_result = result.get("rag_result") or {}
+            sources = rag_result.get("sources", [])
+        else:
+            # Extract sources list from tool result
+            sources = result.get("sources", [])
         if sources:
             # Append citations section to answer (bilingual)
             if language == 'en':
@@ -663,7 +730,7 @@ def format_answer(state: AgentState) -> AgentState:
 # ROUTER — decides which node to run
 # ═══════════════════════════════════════════
 
-def route_task(state: AgentState) -> Literal["analysis", "rag", "code"]:
+def route_task(state: AgentState) -> Literal["analysis", "rag", "code", "analysis_rag"]:
     """
     ROUTER: Conditional edge that directs execution.
 
@@ -678,6 +745,9 @@ def route_task(state: AgentState) -> Literal["analysis", "rag", "code"]:
     if task_type == "analysis":
         # Route to Phase 1 (CSV analysis pipeline)
         return "analysis"
+    elif task_type == "analysis_rag":
+        # Route to hybrid flow (analysis then RAG)
+        return "analysis_rag"
     elif task_type == "code":
         # Route to Phase 3 (Code sandbox execution)
         return "code"
@@ -716,6 +786,7 @@ def build_agent() -> StateGraph:
     graph.add_node("analysis", run_analysis_node)  # Node 2a: Phase 1 analysis
     graph.add_node("rag", run_rag_node)  # Node 2b: Phase 2 RAG
     graph.add_node("code", run_code_node)  # Node 2c: Phase 3 code execution
+    graph.add_node("analysis_rag", run_analysis_rag_node)  # Node 2d: Hybrid analysis+RAG
     graph.add_node("format", format_answer)  # Node 3: Answer formatting
 
     # ENTRY POINT: Always start with classification
@@ -727,6 +798,7 @@ def build_agent() -> StateGraph:
         route_task,  # Router function
         {
             "analysis": "analysis",  # If analysis task
+            "analysis_rag": "analysis_rag",  # If hybrid analysis+RAG task
             "code": "code",  # If code task
             "rag": "rag"  # If RAG task
         }
@@ -734,6 +806,7 @@ def build_agent() -> StateGraph:
 
     # SEQUENTIAL EDGES: All paths converge at format
     graph.add_edge("analysis", "format")
+    graph.add_edge("analysis_rag", "format")
     graph.add_edge("code", "format")
     graph.add_edge("rag", "format")
     

@@ -86,6 +86,7 @@ Database Schema (documents table):
 """
 
 import logging
+import os
 from backend.engines.rag.rag_chain import ask
 from backend.engines.rag.document_loader import load_and_chunk_pdf
 from backend.engines.rag.embedding_engine import embed_chunks
@@ -94,7 +95,7 @@ from backend.engines.rag.vector_store import store_chunks, get_document_count, d
 logger = logging.getLogger(__name__)
 
 
-def ask_document(question: str, top_k: int = 5) -> dict:
+def ask_document(question: str, top_k: int = 5, pdf_source: str = None) -> dict:
     """Answer user question using complete RAG pipeline over indexed PDF corpus.
 
     Five-stage RAG orchestration for document question-answering:
@@ -216,7 +217,8 @@ def ask_document(question: str, top_k: int = 5) -> dict:
     # - Returns complete result dict with success, answer, sources, chunks_used
     # - Handles all errors internally (LLM timeout, embedding failure, etc.)
     # - Typically 5-35 seconds (dominated by LLM generation)
-    result = ask(question, top_k=top_k)
+    source_filter = os.path.basename(pdf_source) if pdf_source else None
+    result = ask(question, top_k=top_k, source_filter=source_filter)
     logger.info(f"✓ RAG query complete: {result.get('chunks_used', 0)} chunks used")
     return result
 

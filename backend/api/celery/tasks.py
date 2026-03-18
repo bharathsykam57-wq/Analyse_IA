@@ -396,10 +396,14 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
         })
 
         # Execute agent with query and optional file context
+        dataset_path = file_path if file_path and file_path.lower().endswith(".csv") else None
+        pdf_source = os.path.basename(file_path) if file_path and file_path.lower().endswith(".pdf") else None
+
         result = master_run_agent(
             question=query,
             session_id=session_id,
-            dataset_path=file_path,
+            dataset_path=dataset_path,
+            pdf_source=pdf_source,
         )
 
         # Notify client: Completed

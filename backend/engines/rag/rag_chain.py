@@ -242,7 +242,7 @@ def generate_answer(prompt: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def ask(question: str, top_k: int = TOP_K) -> dict:
+def ask(question: str, top_k: int = TOP_K, source_filter: str | None = None) -> dict:
     """Full RAG pipeline orchestration: question → answer with sourced evidence.
 
     Core entry point for question-answering system. Chains all pipeline stages:
@@ -335,7 +335,7 @@ def ask(question: str, top_k: int = TOP_K) -> dict:
 
     # STAGE 2: RETRIEVAL — Search for top-K most similar chunks
     # Uses cosine distance in pgvector (lower distance = more similar)
-    search_result = search_similar(query_embedding, top_k=top_k)
+    search_result = search_similar(query_embedding, top_k=top_k, source_filter=source_filter)
     if not search_result["success"]:
         logger.error(f"✗ Search failed: {search_result['error']}")
         return {"success": False, "error": search_result["error"]}
