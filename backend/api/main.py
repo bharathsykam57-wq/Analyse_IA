@@ -113,7 +113,7 @@ async def log_requests(request: Request, call_next):
 
 # Route registration (ordered by phase: auth → upload → task → stream → compliance)
 app.include_router(health_router, prefix="/api/v1")
-# app.include_router(auth_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 # app.include_router(files_router, prefix="/api/v1")
 # app.include_router(agent_router, prefix="/api/v1")
 # app.include_router(ws_router, prefix="/api/v1")
