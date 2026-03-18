@@ -78,10 +78,11 @@ class ProductionAuthTester:
             
             self.log_response("Register", response)
             
-            if response.status_code == 200:
+            if response.status_code in (200, 201):
                 data = response.json()
-                self.access_token = data.get("access_token")
-                self.refresh_token = data.get("refresh_token")
+                tokens = data.get("tokens", {})
+                self.access_token = tokens.get("access_token") or data.get("access_token")
+                self.refresh_token = tokens.get("refresh_token") or data.get("refresh_token")
                 
                 if not self.access_token or not self.refresh_token:
                     logger.error("  ✗ Response missing tokens")
@@ -121,8 +122,9 @@ class ProductionAuthTester:
             
             if response.status_code == 200:
                 data = response.json()
-                self.access_token = data.get("access_token")
-                self.refresh_token = data.get("refresh_token")
+                tokens = data.get("tokens", {})
+                self.access_token = tokens.get("access_token") or data.get("access_token")
+                self.refresh_token = tokens.get("refresh_token") or data.get("refresh_token")
                 
                 logger.info(f"  ✓ Login successful")
                 self.results.append(("Login", "PASS"))
@@ -147,7 +149,7 @@ class ProductionAuthTester:
         
         try:
             response = self.client.get(
-                f"{self.backend_url}/api/v1/health",
+                f"{self.backend_url}/api/v1/auth/me",
                 headers={
                     "Authorization": f"Bearer {self.access_token}",
                     "Accept": "application/json",
@@ -175,7 +177,7 @@ class ProductionAuthTester:
         
         try:
             response = self.client.get(
-                f"{self.backend_url}/api/v1/health",
+                f"{self.backend_url}/api/v1/auth/me",
                 headers={
                     "Authorization": "Bearer invalid.token.here",
                     "Accept": "application/json",
@@ -246,7 +248,11 @@ class ProductionAuthTester:
         try:
             response = self.client.options(
                 f"{self.backend_url}/api/v1/auth/login",
-                headers={"Origin": "https://example.com"},
+                headers={
+                    "Origin": "http://localhost:3000",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type,authorization",
+                },
             )
             
             self.log_response("CORS", response)

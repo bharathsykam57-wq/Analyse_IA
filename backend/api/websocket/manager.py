@@ -20,10 +20,11 @@ import json
 import logging
 import redis.asyncio as aioredis
 import os
+from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = get_redis_url()
 
 
 class ConnectionManager:

@@ -1,10 +1,11 @@
 from celery import Celery
 from dotenv import load_dotenv
 import os
+from backend.utils.redis_config import get_redis_url
 
 load_dotenv()
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = get_redis_url()
 
 # SSL Configuration for Upstash Redis (rediss://)
 # Using ssl_cert_reqs="CERT_NONE" for Upstash free tier compatibility

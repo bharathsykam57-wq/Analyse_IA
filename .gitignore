@@ -102,6 +102,8 @@ test_*.sh
 # Local production documentation (development reference only)
 PRODUCTION_SETUP.md
 TASK_4_IMPLEMENTATION_GUIDE.md
+DEPLOYMENT_CHECKLIST.md
+RAILWAY_DEPLOYMENT_CONFIG.md
 .coverage
 htmlcov/
 coverage.xml

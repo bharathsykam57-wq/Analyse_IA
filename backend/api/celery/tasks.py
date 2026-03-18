@@ -82,6 +82,7 @@ import os
 import time
 from backend.monitoring.langfuse_client import trace_analysis
 from backend.monitoring.experiment_tracker import log_experiment_sync
+from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ logger = logging.getLogger(__name__)
 #   - Progress channel (Pub/Sub for WebSocket streaming)
 # Format: redis://[password@]host:port/db
 # Example: redis://localhost:6379/0 (local), redis://:secret@redis.prod:6379/1 (prod)
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = get_redis_url()
 
 
 def publish_progress(task_id: str, data: dict):

@@ -3,6 +3,7 @@ import time
 import logging
 import httpx
 import redis
+from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def check_ollama():
 def check_redis():
     try:
         r = redis.Redis.from_url(
-            os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            get_redis_url(),
             socket_timeout=3,
         )
         r.ping()
