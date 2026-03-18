@@ -18,10 +18,34 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Supports fast cleanup scans and admin/session queries.
-    op.execute("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON refresh_tokens (user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_expires_at ON refresh_tokens (expires_at)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_revoked_expires_at ON refresh_tokens (revoked, expires_at)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id_revoked ON refresh_tokens (user_id, revoked)")
+    op.create_index(
+        "ix_refresh_tokens_user_id",
+        "refresh_tokens",
+        ["user_id"],
+        unique=False,
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_refresh_tokens_expires_at",
+        "refresh_tokens",
+        ["expires_at"],
+        unique=False,
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_refresh_tokens_revoked_expires_at",
+        "refresh_tokens",
+        ["revoked", "expires_at"],
+        unique=False,
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_refresh_tokens_user_id_revoked",
+        "refresh_tokens",
+        ["user_id", "revoked"],
+        unique=False,
+        if_not_exists=True,
+    )
 
 
 def downgrade() -> None:
