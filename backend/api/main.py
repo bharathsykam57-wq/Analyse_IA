@@ -52,8 +52,7 @@ CORS_ORIGINS = [
 ]
 
 # Run database migrations on startup (production only)
-# TODO: Debug Redis connection issue before enabling
-if False:
+if IS_PRODUCTION:
     logger.info("Running database migrations...")
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
