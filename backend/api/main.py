@@ -34,6 +34,7 @@ from backend.api.routes.files import router as files_router
 from backend.api.routes.agent import router as agent_router
 from backend.api.websocket.router import router as ws_router
 from backend.api.rgpd.router import router as rgpd_router
+from backend.monitoring.metrics import record_http_request
 
 load_dotenv()
 
@@ -113,11 +114,23 @@ async def log_requests(request: Request, call_next):
 
         # Expose timing to client (debugging, monitoring)
         response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
+        record_http_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_seconds=process_time_ms / 1000.0,
+        )
         return response
     except Exception as exc:
         process_time_ms = (time.time() - start_time) * 1000
         logger.exception(
             f"{request.method} {request.url.path} → 500 ({process_time_ms:.2f}ms) | unhandled exception: {exc}"
+        )
+        record_http_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=500,
+            duration_seconds=process_time_ms / 1000.0,
         )
         return JSONResponse(
             status_code=500,

@@ -3,7 +3,9 @@ import os
 import json
 import redis
 from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from backend.monitoring.health import full_health_check
+from backend.monitoring.metrics import render_prometheus_text
 from backend.utils.redis_config import get_redis_url
 
 router = APIRouter(tags=["health"])
@@ -44,6 +46,15 @@ async def deep_health():
     """Full system health — DB, Redis, Ollama, Celery queue depth."""
     result = await full_health_check()
     return result
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_metrics():
+    """Prometheus-compatible metrics endpoint."""
+    return PlainTextResponse(
+        content=render_prometheus_text(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 @router.get("/ops/celery/dlq")
