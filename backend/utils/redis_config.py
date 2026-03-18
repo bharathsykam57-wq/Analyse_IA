@@ -11,7 +11,12 @@ def get_redis_url() -> str:
     raw_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     parsed = urlparse(raw_url)
 
+    normalized_path = parsed.path if parsed.path and parsed.path != "/" else "/0"
+
     if parsed.scheme == "redis" and parsed.hostname and parsed.hostname.endswith("upstash.io"):
-        return urlunparse(("rediss", parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+        return urlunparse(("rediss", parsed.netloc, normalized_path, parsed.params, parsed.query, parsed.fragment))
+
+    if parsed.scheme in {"redis", "rediss"}:
+        return urlunparse((parsed.scheme, parsed.netloc, normalized_path, parsed.params, parsed.query, parsed.fragment))
 
     return raw_url
