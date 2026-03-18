@@ -49,6 +49,11 @@ echo "[RUN] MLOps bootstrap smoke"
 "$PYTHON_BIN" "$ROOT_DIR/tests/test_mlops_bootstrap.py"
 echo "[PASS] MLOps bootstrap smoke"
 
+echo
+echo "[RUN] DVC bootstrap dry-run smoke"
+"$PYTHON_BIN" "$ROOT_DIR/tests/test_dvc_bootstrap.py"
+echo "[PASS] DVC bootstrap dry-run smoke"
+
 if [[ -n "$BACKEND_URL" ]]; then
   echo
   echo "[RUN] Remote /api/v1/metrics endpoint check"
