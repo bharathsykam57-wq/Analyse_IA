@@ -1,11 +1,43 @@
 import { AnalysisResult } from "@/shared/types/agent";
 import { Card, CardHeader, CardTitle, CardContent } from "@/shared/components/ui/Card";
 import { Activity, Database, AlertTriangle, TrendingUp, BarChart4 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/shared/lib/utils";
 
 interface DashboardMetricsProps {
   data: AnalysisResult;
   className?: string;
+}
+
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  icon: LucideIcon;
+  colorClass: string;
+  cardClassName?: string;
+}
+
+function StatCard({ title, value, subtitle, icon: Icon, colorClass, cardClassName }: StatCardProps) {
+  return (
+    <Card className={cn("border-border/50 bg-black/20 backdrop-blur-sm group hover:-translate-y-1 hover:shadow-lg hover:shadow-blue-900/20 hover:border-blue-500/30 transition-all duration-300 cursor-default", cardClassName)}>
+      <CardContent className="p-6 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-white/0 via-white/5 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
+        <div className="flex items-center justify-between space-y-0 pb-2 relative z-10">
+          <p className="text-sm font-medium text-gray-400 group-hover:text-gray-300 transition-colors">{title}</p>
+          <div className={cn("p-2 rounded-lg group-hover:scale-110 transition-transform duration-300", colorClass)}>
+            <Icon className="w-4 h-4" />
+          </div>
+        </div>
+        <div className="mt-2 relative z-10">
+          <p className="text-2xl font-bold text-white tracking-tight">{value}</p>
+          {subtitle && (
+            <p className="text-xs text-gray-500 mt-1">{subtitle}</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
@@ -49,26 +81,6 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
   const baseScore = pickMetric(baseMetrics, ["Accuracy", "accuracy", "R2", "r2"]);
   const tunedScore = pickMetric(tunedMetrics, ["Accuracy", "accuracy", "R2", "r2"]);
   
-  const StatCard = ({ title, value, subtitle, icon: Icon, colorClass }: any) => (
-    <Card className={cn("border-border/50 bg-black/20 backdrop-blur-sm group hover:-translate-y-1 hover:shadow-lg hover:shadow-blue-900/20 hover:border-blue-500/30 transition-all duration-300 cursor-default", className)}>
-      <CardContent className="p-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-white/0 via-white/5 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
-        <div className="flex items-center justify-between space-y-0 pb-2 relative z-10">
-          <p className="text-sm font-medium text-gray-400 group-hover:text-gray-300 transition-colors">{title}</p>
-          <div className={cn("p-2 rounded-lg group-hover:scale-110 transition-transform duration-300", colorClass)}>
-            <Icon className="w-4 h-4" />
-          </div>
-        </div>
-        <div className="mt-2 relative z-10">
-          <p className="text-2xl font-bold text-white tracking-tight">{value}</p>
-          {subtitle && (
-            <p className="text-xs text-gray-500 mt-1">{subtitle}</p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
       
@@ -84,6 +96,7 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
           }
           icon={Activity}
           colorClass="bg-blue-500/10 text-blue-500"
+          cardClassName={className}
         />
         <StatCard
           title="Volume de Données"
@@ -91,6 +104,7 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
           subtitle={`${columns} variables analysées`}
           icon={Database}
           colorClass="bg-emerald-500/10 text-emerald-500"
+          cardClassName={className}
         />
         <StatCard
           title="Taux d'Anomalies"
@@ -98,6 +112,7 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
           subtitle={`${anomalies?.total || 0} détectées au total`}
           icon={AlertTriangle}
           colorClass="bg-amber-500/10 text-amber-500"
+          cardClassName={className}
         />
         <StatCard
           title="Performance"
@@ -105,6 +120,7 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
           subtitle={`Métrique principale (${selectedMetricLabel})`}
           icon={TrendingUp}
           colorClass="bg-indigo-500/10 text-indigo-500"
+          cardClassName={className}
         />
       </div>
 
@@ -128,7 +144,7 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
             <CardTitle className="text-lg flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
                 <BarChart4 className="w-5 h-5 text-blue-400" />
-                Facteurs d'Influence Clés
+                Facteurs d’Influence Clés
               </div>
               <button className="text-xs font-normal text-blue-400 hover:text-white px-2 py-1 rounded-md hover:bg-blue-500/20 transition-colors">
                 Explorer
