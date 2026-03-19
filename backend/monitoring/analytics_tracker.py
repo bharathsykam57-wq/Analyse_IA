@@ -11,6 +11,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import psycopg2
+from psycopg2.extras import Json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -57,7 +58,7 @@ def log_analytics_event_sync(
                 duration_ms,
                 file_type,
                 file_size_bytes,
-                metadata,
+                Json(metadata) if metadata is not None else None,
                 now,
             ),
         )

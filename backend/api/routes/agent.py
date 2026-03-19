@@ -18,7 +18,7 @@ Integration:
   Frontend receives real-time updates via: ws://host/ws/tasks/{task_id}
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -35,6 +35,7 @@ from backend.api.celery.tasks import run_agent, publish_progress
 from backend.api.celery.worker import celery_app
 from backend.utils.redis_config import get_redis_url
 from backend.monitoring.analytics_tracker import log_analytics_event_sync
+from backend.api.security.rate_limit import enforce_ip_rate_limit, enforce_user_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,7 @@ async def ask_agent(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     accept_language: Optional[str] = Header(None),
+    http_request: Request = None,
 ):
     """Dispatch agent query to Celery for async multi-phase analysis.
     
@@ -167,6 +169,23 @@ async def ask_agent(
     Returns:
         AgentResponse with task_id for status polling or WebSocket subscription.
     """
+    if http_request is not None:
+        enforce_ip_rate_limit(
+            request=http_request,
+            scope="agent_ask",
+            limit=30,
+            window_sec=60,
+            message="Too many requests from this IP. Please retry in one minute.",
+        )
+        enforce_user_rate_limit(
+            request=http_request,
+            scope="agent_ask",
+            user_id=str(current_user.id),
+            limit=20,
+            window_sec=60,
+            message="Too many analysis requests for this account. Please retry in one minute.",
+        )
+
     session_id = request.session_id or f"{current_user.id}"
 
     language = (
@@ -452,6 +471,7 @@ def get_cached_task_history(
 async def cancel_task(
     task_id: str,
     current_user: User = Depends(get_current_active_user),
+    http_request: Request = None,
 ):
     """Cancel an in-flight Celery task.
 
@@ -459,6 +479,16 @@ async def cancel_task(
     - Uses Celery revoke(terminate=True) for best-effort termination.
     - Emits a terminal `canceled` progress event for WebSocket clients.
     """
+    if http_request is not None:
+        enforce_user_rate_limit(
+            request=http_request,
+            scope="agent_cancel",
+            user_id=str(current_user.id),
+            limit=60,
+            window_sec=60,
+            message="Too many cancellation requests. Please retry in one minute.",
+        )
+
     result = AsyncResult(task_id, app=celery_app)
 
     if result.status in {"SUCCESS", "FAILURE", "REVOKED"}:

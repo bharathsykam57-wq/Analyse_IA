@@ -44,7 +44,7 @@ HTTP Status Codes:
     500 Server Error  → Database connection, unexpected errors
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_db
@@ -72,6 +72,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
 import time
 from backend.monitoring.analytics_tracker import log_analytics_event_sync
+from backend.api.security.rate_limit import enforce_ip_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +305,11 @@ def get_current_active_user(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+async def register(
+    request: RegisterRequest,
+    db: Session = Depends(get_db),
+    http_request: Request = None,
+):
     """Create a new user account with bcrypt password hashing and initial token pair.
 
     This endpoint implements user registration for the Analyse_IA application. It
@@ -495,6 +500,14 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         - Password reset: (Not yet implemented)
     """
     start = time.time()
+    if http_request is not None:
+        enforce_ip_rate_limit(
+            request=http_request,
+            scope="auth_register",
+            limit=10,
+            window_sec=60,
+            message="Too many registration attempts. Please retry in one minute.",
+        )
     try:
         user = register_user(request, db)
         access_token, expires_in = create_access_token(user.id, user.email)
@@ -536,7 +549,11 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/login", response_model=AuthResponse)
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
+async def login(
+    request: LoginRequest,
+    db: Session = Depends(get_db),
+    http_request: Request = None,
+):
     """Authenticate user with email/password, return JWT and refresh tokens.
 
     This endpoint implements standard authentication for the Analyse_IA application.
@@ -760,6 +777,14 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         - Email verification requirement (is_verified flag exists but not checked)
     """
     start = time.time()
+    if http_request is not None:
+        enforce_ip_rate_limit(
+            request=http_request,
+            scope="auth_login",
+            limit=20,
+            window_sec=60,
+            message="Too many login attempts. Please retry in one minute.",
+        )
     try:
         user = login_user(request, db)
         access_token, expires_in = create_access_token(user.id, user.email)
