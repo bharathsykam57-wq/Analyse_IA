@@ -31,6 +31,9 @@ EXECUTION_TIMEOUT = 30                    # Seconds before container killed
 MEMORY_LIMIT = "256m"                     # Max RAM per execution
 CPU_QUOTA = 50000                         # 50% of one CPU core (out of 100000)
 MAX_OUTPUT_CHARS = 10_000                 # Truncate output beyond this
+SANDBOX_TMP_DIR = tempfile.gettempdir()
+SANDBOX_CODE_PATH = os.path.join(SANDBOX_TMP_DIR, "code.py")
+SANDBOX_MPLCONFIG_PATH = os.path.join(SANDBOX_TMP_DIR, "matplotlib")
 
 
 # ─── Pre-installed packages in sandbox ───────────────────────────────────────
@@ -202,14 +205,14 @@ def run_in_sandbox(code: str) -> dict:
 
             container = client.containers.create(
                 image=SANDBOX_IMAGE,
-                command=["python", "/tmp/code.py"],
+                command=["python", SANDBOX_CODE_PATH],
                 network_disabled=True,
                 mem_limit=MEMORY_LIMIT,
                 cpu_quota=CPU_QUOTA,
                 read_only=True,
-                tmpfs={"/tmp": "size=64m"},
-                volumes={temp_path: {"bind": "/tmp/code.py", "mode": "ro"}},
-                environment={"MPLCONFIGDIR": "/tmp/matplotlib"},
+                tmpfs={SANDBOX_TMP_DIR: "size=64m"},
+                volumes={temp_path: {"bind": SANDBOX_CODE_PATH, "mode": "ro"}},
+                environment={"MPLCONFIGDIR": SANDBOX_MPLCONFIG_PATH},
             )
 
             try:
@@ -220,7 +223,7 @@ def run_in_sandbox(code: str) -> dict:
                 if exit_status["StatusCode"] != 0:
                     raise ContainerError(
                         container, exit_status["StatusCode"],
-                        "python /tmp/code.py", SANDBOX_IMAGE, raw_output.encode()
+                        f"python {SANDBOX_CODE_PATH}", SANDBOX_IMAGE, raw_output.encode()
                     )
             finally:
                 container.remove(force=True)  # Always destroy, even on error

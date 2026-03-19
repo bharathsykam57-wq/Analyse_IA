@@ -8,7 +8,7 @@ generation (RAG) systems:
 
 Design principles:
 - Overlapping chunks maintain semantic context across boundaries
-- Deterministic chunk IDs (MD5 hashes) enable deduplication and reproducibility
+    - Deterministic chunk IDs (SHA-256 hashes) enable deduplication and reproducibility
 - Page-by-page processing handles PDFs with corrupted pages gracefully
 - Comprehensive logging provides audit trail for production debugging
 
@@ -144,7 +144,7 @@ def chunk_text(text: str, source: str, page_num: int) -> list[dict]:
     - Step forward by (CHUNK_SIZE - CHUNK_OVERLAP) to create overlaps
     - Example: CHUNK_SIZE=500, CHUNK_OVERLAP=50 means 450-char sliding step
     - Preserves contextual overlap between adjacent chunks (reduces semantic breaks)
-    - Generates deterministic MD5 IDs for deduplication and cache hits
+    - Generates deterministic SHA-256 IDs for deduplication and cache hits
 
     Args:
         text: Raw extracted text from one PDF page (already trimmed)
@@ -158,7 +158,7 @@ def chunk_text(text: str, source: str, page_num: int) -> list[dict]:
         - source (str): Source filename
         - page (int): Page number (1-indexed)
         - chunk_index (int): Sequential chunk number within this page [0, 1, 2, ...]
-        - chunk_id (str): Deterministic MD5 hash of (source, page, chunk_index)
+        - chunk_id (str): Deterministic SHA-256 hash of (source, page, chunk_index)
                          Used for deduplication across ingestion runs
     """
     # Handle empty or whitespace-only input
@@ -178,10 +178,10 @@ def chunk_text(text: str, source: str, page_num: int) -> list[dict]:
 
         # Only add non-empty chunks (skip trailing whitespace-only chunks)
         if chunk_text_content:
-            # Generate deterministic chunk ID: MD5 hash of (source_page_index)
+            # Generate deterministic chunk ID: SHA-256 hash of (source_page_index)
             # Ensures reproducible IDs across multiple ingestion runs
             # Enables deduplication and reliable cache hits
-            chunk_id = hashlib.md5(
+            chunk_id = hashlib.sha256(
                 f"{source}_{page_num}_{chunk_index}".encode()
             ).hexdigest()
 
