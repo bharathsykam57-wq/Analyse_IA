@@ -1,0 +1,131 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend Tests & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements/production.txt
+            requirements/base.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/production.txt
+          pip install bandit
+
+      - name: Syntax check
+        run: python -m compileall backend
+
+      - name: Security lint (Bandit)
+        run: bandit -r backend -x backend/tests -ll
+
+      - name: Run focused backend regressions
+        run: |
+          python tests/test_rate_limit_utils.py
+          python tests/test_rate_limit_endpoints.py
+          python tests/test_ops_rate_limit_state_endpoint.py
+          python tests/test_progress_payload.py
+          python tests/test_cancel_endpoint.py
+          python tests/test_task_summary_endpoint.py
+
+  frontend-quality:
+    name: Frontend Lint & Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+  security-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements/production.txt
+
+  performance-smoke:
+    name: Performance Benchmark Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install minimal benchmark deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi redis
+
+      - name: Run lightweight timing probes
+        run: |
+          python - <<'PY'
+          import timeit
+          
+          parse_cost = timeit.timeit("'x'*1024", number=50000)
+          json_cost = timeit.timeit("{'a': 1, 'b': 2, 'c': 3}", number=100000)
+          print(f"parse_cost={parse_cost:.4f}s json_cost={json_cost:.4f}s")
+          PY
+
+  # Railway deploy can be added in a follow-up workflow once repository secrets
+  # are configured and environment protections are in place.
