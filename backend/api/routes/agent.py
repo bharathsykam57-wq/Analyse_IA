@@ -85,6 +85,17 @@ class CancelResponse(BaseModel):
     message: str
 
 
+class TaskSummaryResponse(BaseModel):
+    task_id: str
+    status: str
+    terminal: bool
+    source: str
+    can_cancel: bool
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    payload: Optional[dict] = None
+
+
 def _task_cache_key(task_id: str) -> str:
     return f"{TASK_RESULT_CACHE_PREFIX}:{task_id}"
 
@@ -315,6 +326,82 @@ async def task_status(
         response["error"] = "Task canceled by user"
 
     return response
+
+
+@router.get("/task/{task_id}/summary", response_model=TaskSummaryResponse)
+async def task_summary(
+    task_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return a unified task view combining Celery status and cached terminal payload.
+
+    Frontend can use this endpoint as a single source of truth for:
+    - current state (queued/running/terminal)
+    - terminal payload details (result/error/progress metadata)
+    - cancellation eligibility
+    """
+    result = AsyncResult(task_id, app=celery_app)
+
+    if result.status == "SUCCESS":
+        result_data = result.result if isinstance(result.result, dict) else {"value": result.result}
+        return TaskSummaryResponse(
+            task_id=task_id,
+            status="completed",
+            terminal=True,
+            source="celery",
+            can_cancel=False,
+            result=result_data,
+            payload={"status": "completed", "result": result_data},
+        )
+
+    if result.status == "FAILURE":
+        error_msg = str(result.result)
+        return TaskSummaryResponse(
+            task_id=task_id,
+            status="failed",
+            terminal=True,
+            source="celery",
+            can_cancel=False,
+            error=error_msg,
+            payload={"status": "failed", "error": error_msg},
+        )
+
+    if result.status == "REVOKED":
+        return TaskSummaryResponse(
+            task_id=task_id,
+            status="canceled",
+            terminal=True,
+            source="celery",
+            can_cancel=False,
+            error="Task canceled by user",
+            payload={"status": "canceled", "error": "Task canceled by user"},
+        )
+
+    cached_payload = _get_cached_task_payload(task_id)
+    if cached_payload:
+        cached_status = str(cached_payload.get("status", "completed"))
+        terminal = cached_status in {"completed", "failed", "canceled"}
+        result_data = cached_payload.get("result") if isinstance(cached_payload.get("result"), dict) else None
+        error_msg = cached_payload.get("error")
+        return TaskSummaryResponse(
+            task_id=task_id,
+            status=cached_status,
+            terminal=terminal,
+            source="cache",
+            can_cancel=bool(cached_payload.get("can_cancel", False)),
+            result=result_data,
+            error=error_msg,
+            payload=cached_payload,
+        )
+
+    status_l = str(result.status).lower()
+    return TaskSummaryResponse(
+        task_id=task_id,
+        status=status_l,
+        terminal=False,
+        source="celery",
+        can_cancel=status_l in {"pending", "started", "retry"},
+    )
 
 
 @router.get("/history/cache")
