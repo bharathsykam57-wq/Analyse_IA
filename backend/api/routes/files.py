@@ -50,6 +50,7 @@ import aiofiles
 import os
 import uuid
 import logging
+from backend.monitoring.analytics_tracker import log_analytics_event_sync
 
 from backend.api.dependencies import get_db
 from backend.api.auth.router import get_current_active_user
@@ -230,6 +231,14 @@ async def upload_csv(
         await f.write(contents)
 
     logger.info(f"CSV uploaded: {filename} ({len(contents)} bytes) by {current_user.email}")
+    log_analytics_event_sync(
+        event_type="file_upload",
+        status="success",
+        user_id=str(current_user.id),
+        file_type="csv",
+        file_size_bytes=len(contents),
+        metadata={"filename": filename},
+    )
 
     return {
         "file_id": file_id,
@@ -354,6 +363,14 @@ async def upload_pdf(
         await f.write(contents)
 
     logger.info(f"PDF uploaded: {filename} ({len(contents)} bytes) by {current_user.email}")
+    log_analytics_event_sync(
+        event_type="file_upload",
+        status="success",
+        user_id=str(current_user.id),
+        file_type="pdf",
+        file_size_bytes=len(contents),
+        metadata={"filename": filename},
+    )
 
     return {
         "file_id": file_id,

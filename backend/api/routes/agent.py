@@ -34,6 +34,7 @@ from backend.api.auth.models import User
 from backend.api.celery.tasks import run_agent, publish_progress
 from backend.api.celery.worker import celery_app
 from backend.utils.redis_config import get_redis_url
+from backend.monitoring.analytics_tracker import log_analytics_event_sync
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,14 @@ async def ask_agent(
     )
 
     _record_user_task(str(current_user.id), task.id)
+    log_analytics_event_sync(
+        event_type="analysis_requested",
+        status="success",
+        user_id=str(current_user.id),
+        session_id=session_id,
+        task_id=task.id,
+        metadata={"language": language, "has_file": bool(file_path)},
+    )
 
     logger.info(
         f"Agent task dispatched: {task.id} "
@@ -476,6 +485,12 @@ async def cancel_task(
     )
 
     logger.info(f"Task canceled: task_id={task_id} user={current_user.email}")
+    log_analytics_event_sync(
+        event_type="task_canceled",
+        status="success",
+        user_id=str(current_user.id),
+        task_id=task_id,
+    )
     return CancelResponse(
         task_id=task_id,
         status="canceled",

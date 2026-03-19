@@ -70,6 +70,8 @@ from jose import JWTError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 import logging
+import time
+from backend.monitoring.analytics_tracker import log_analytics_event_sync
 
 logger = logging.getLogger(__name__)
 
@@ -492,10 +494,18 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         - Email verification: (Not yet implemented)
         - Password reset: (Not yet implemented)
     """
+    start = time.time()
     try:
         user = register_user(request, db)
         access_token, expires_in = create_access_token(user.id, user.email)
         refresh_token = create_refresh_token(user.id, db)
+
+        log_analytics_event_sync(
+            event_type="user_signup",
+            status="success",
+            user_id=str(user.id),
+            duration_ms=(time.time() - start) * 1000,
+        )
 
         logger.info(f"User registered: {user.email}")
         return AuthResponse(
@@ -507,6 +517,12 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
             ),
         )
     except ValueError as e:
+        log_analytics_event_sync(
+            event_type="user_signup",
+            status="failure",
+            duration_ms=(time.time() - start) * 1000,
+            metadata={"reason": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -743,10 +759,18 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         - Device management (current system allows multiple devices)
         - Email verification requirement (is_verified flag exists but not checked)
     """
+    start = time.time()
     try:
         user = login_user(request, db)
         access_token, expires_in = create_access_token(user.id, user.email)
         refresh_token = create_refresh_token(user.id, db)
+
+        log_analytics_event_sync(
+            event_type="user_login",
+            status="success",
+            user_id=str(user.id),
+            duration_ms=(time.time() - start) * 1000,
+        )
 
         logger.info(f"User logged in: {user.email}")
         return AuthResponse(
@@ -758,6 +782,12 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             ),
         )
     except ValueError as e:
+        log_analytics_event_sync(
+            event_type="user_login",
+            status="failure",
+            duration_ms=(time.time() - start) * 1000,
+            metadata={"reason": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),

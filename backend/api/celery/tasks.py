@@ -84,6 +84,7 @@ import requests
 from backend.monitoring.langfuse_client import trace_analysis
 from backend.monitoring.experiment_tracker import log_experiment_sync
 from backend.monitoring.metrics import record_task_event, observe_task_duration
+from backend.monitoring.analytics_tracker import log_analytics_event_sync
 from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
@@ -394,8 +395,19 @@ class LoggedTask(Task):
         if not will_retry:
             record_task_event(self.name or "unknown_task", "failed")
             started_at = getattr(self.request, "_started_at_monotonic", None)
+            duration_ms = None
             if started_at:
-                observe_task_duration(self.name or "unknown_task", time.monotonic() - started_at)
+                elapsed = time.monotonic() - started_at
+                observe_task_duration(self.name or "unknown_task", elapsed)
+                duration_ms = elapsed * 1000
+            log_analytics_event_sync(
+                event_type="task_execution",
+                status="failure",
+                session_id=None,
+                task_id=task_id,
+                duration_ms=duration_ms,
+                metadata={"task_name": self.name or "unknown_task", "error": str(exc)},
+            )
             _push_dead_letter(task_id, {
                 "status": "failed",
                 "error": str(exc),
@@ -425,8 +437,19 @@ class LoggedTask(Task):
         logger.info(f"Task {task_id} completed successfully")
         record_task_event(self.name or "unknown_task", "completed")
         started_at = getattr(self.request, "_started_at_monotonic", None)
+        duration_ms = None
         if started_at:
-            observe_task_duration(self.name or "unknown_task", time.monotonic() - started_at)
+            elapsed = time.monotonic() - started_at
+            observe_task_duration(self.name or "unknown_task", elapsed)
+            duration_ms = elapsed * 1000
+        log_analytics_event_sync(
+            event_type="task_execution",
+            status="success",
+            session_id=None,
+            task_id=task_id,
+            duration_ms=duration_ms,
+            metadata={"task_name": self.name or "unknown_task"},
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 from backend.monitoring.health import full_health_check
 from backend.monitoring.metrics import render_prometheus_text
+from backend.monitoring.analytics_tracker import get_analytics_summary_sync
 from backend.utils.redis_config import get_redis_url
 
 router = APIRouter(tags=["health"])
@@ -92,3 +93,13 @@ async def get_celery_dead_letter(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch dead-letter queue: {e}",
         )
+
+
+@router.get("/ops/analytics/summary")
+async def get_analytics_summary(
+    days: int = Query(default=7, ge=1, le=90),
+    x_ops_token: str | None = Header(default=None),
+):
+    """Get aggregated analytics summary for dashboard metrics (ops-only)."""
+    _verify_ops_token(x_ops_token)
+    return get_analytics_summary_sync(days=days)

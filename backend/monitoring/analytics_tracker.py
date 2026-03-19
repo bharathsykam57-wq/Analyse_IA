@@ -1,0 +1,172 @@
+"""Analytics event tracking utilities.
+
+Best-effort, non-blocking style: all functions swallow errors and log warnings.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from datetime import date, datetime, timezone
+from typing import Any
+
+import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+def _conn_str() -> str:
+    db_url = os.getenv("DATABASE_URL", "")
+    return db_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgresql+psycopg2://", "postgresql://")
+
+
+def log_analytics_event_sync(
+    *,
+    event_type: str,
+    status: str = "success",
+    user_id: str | None = None,
+    session_id: str | None = None,
+    task_id: str | None = None,
+    duration_ms: float | None = None,
+    file_type: str | None = None,
+    file_size_bytes: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        conn = psycopg2.connect(_conn_str())
+        cur = conn.cursor()
+
+        now = datetime.now(timezone.utc)
+        today = date.today()
+
+        cur.execute(
+            """
+            INSERT INTO analytics_events (
+                event_type, status, user_id, session_id, task_id,
+                duration_ms, file_type, file_size_bytes, metadata, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                event_type,
+                status,
+                user_id,
+                session_id,
+                task_id,
+                duration_ms,
+                file_type,
+                file_size_bytes,
+                metadata,
+                now,
+            ),
+        )
+
+        cur.execute(
+            """
+            INSERT INTO metrics_summary (
+                summary_date, event_type, total_count, success_count, failure_count,
+                avg_duration_ms, last_event_at
+            ) VALUES (
+                %s, %s, 1, %s, %s, %s, %s
+            )
+            ON CONFLICT (summary_date, event_type)
+            DO UPDATE SET
+                total_count = metrics_summary.total_count + 1,
+                success_count = metrics_summary.success_count + EXCLUDED.success_count,
+                failure_count = metrics_summary.failure_count + EXCLUDED.failure_count,
+                avg_duration_ms = CASE
+                    WHEN EXCLUDED.avg_duration_ms IS NULL THEN metrics_summary.avg_duration_ms
+                    WHEN metrics_summary.avg_duration_ms IS NULL THEN EXCLUDED.avg_duration_ms
+                    ELSE ((metrics_summary.avg_duration_ms * metrics_summary.total_count) + EXCLUDED.avg_duration_ms)
+                         / (metrics_summary.total_count + 1)
+                END,
+                last_event_at = EXCLUDED.last_event_at
+            """,
+            (
+                today,
+                event_type,
+                1 if status == "success" else 0,
+                1 if status != "success" else 0,
+                duration_ms,
+                now,
+            ),
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as err:
+        logger.warning(f"Analytics event logging failed (non-blocking): {err}")
+
+
+def get_analytics_summary_sync(days: int = 7) -> dict[str, Any]:
+    try:
+        conn = psycopg2.connect(_conn_str())
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT
+                event_type,
+                SUM(total_count) AS total_count,
+                SUM(success_count) AS success_count,
+                SUM(failure_count) AS failure_count,
+                AVG(avg_duration_ms) AS avg_duration_ms
+            FROM metrics_summary
+            WHERE summary_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+            GROUP BY event_type
+            ORDER BY total_count DESC
+            """,
+            (days,),
+        )
+        by_event = [
+            {
+                "event_type": row[0],
+                "total_count": int(row[1] or 0),
+                "success_count": int(row[2] or 0),
+                "failure_count": int(row[3] or 0),
+                "avg_duration_ms": float(row[4]) if row[4] is not None else None,
+            }
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """
+            SELECT
+                COALESCE(SUM(total_count), 0),
+                COALESCE(SUM(success_count), 0),
+                COALESCE(SUM(failure_count), 0)
+            FROM metrics_summary
+            WHERE summary_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+            """,
+            (days,),
+        )
+        totals = cur.fetchone() or (0, 0, 0)
+
+        cur.close()
+        conn.close()
+
+        total_count = int(totals[0] or 0)
+        success_count = int(totals[1] or 0)
+        failure_count = int(totals[2] or 0)
+
+        return {
+            "window_days": days,
+            "total_events": total_count,
+            "success_events": success_count,
+            "failure_events": failure_count,
+            "success_rate": (success_count / total_count) if total_count else 0.0,
+            "events_by_type": by_event,
+        }
+    except Exception as err:
+        logger.warning(f"Analytics summary fetch failed (non-blocking): {err}")
+        return {
+            "window_days": days,
+            "total_events": 0,
+            "success_events": 0,
+            "failure_events": 0,
+            "success_rate": 0.0,
+            "events_by_type": [],
+            "error": str(err),
+        }
