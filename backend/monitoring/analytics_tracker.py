@@ -170,3 +170,82 @@ def get_analytics_summary_sync(days: int = 7) -> dict[str, Any]:
             "events_by_type": [],
             "error": str(err),
         }
+
+
+def get_analytics_dashboard_cards_sync(days: int = 7) -> dict[str, Any]:
+    summary = get_analytics_summary_sync(days=days)
+    event_map = {item["event_type"]: item for item in summary.get("events_by_type", [])}
+
+    def _count(event_type: str) -> int:
+        return int(event_map.get(event_type, {}).get("total_count", 0))
+
+    analysis_event = event_map.get("analysis_requested", {})
+    execution_event = event_map.get("task_execution", {})
+
+    return {
+        "window_days": days,
+        "cards": {
+            "signups": _count("user_signup"),
+            "logins": _count("user_login"),
+            "uploads": _count("file_upload"),
+            "analysis_requests": _count("analysis_requested"),
+            "task_success_rate": (
+                execution_event.get("success_count", 0) / execution_event.get("total_count", 1)
+                if execution_event.get("total_count", 0)
+                else 0.0
+            ),
+            "analysis_avg_duration_ms": analysis_event.get("avg_duration_ms"),
+        },
+    }
+
+
+def get_upload_distribution_sync(days: int = 7) -> dict[str, Any]:
+    try:
+        conn = psycopg2.connect(_conn_str())
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT
+                COALESCE(file_type, 'unknown') AS file_type,
+                COUNT(*) AS upload_count,
+                COALESCE(SUM(file_size_bytes), 0) AS total_bytes,
+                AVG(file_size_bytes) AS avg_size_bytes,
+                MAX(file_size_bytes) AS max_size_bytes
+            FROM analytics_events
+            WHERE event_type = 'file_upload'
+              AND created_at >= NOW() - (%s * INTERVAL '1 day')
+            GROUP BY COALESCE(file_type, 'unknown')
+            ORDER BY upload_count DESC
+            """,
+            (days,),
+        )
+
+        rows = cur.fetchall()
+        items = [
+            {
+                "file_type": row[0],
+                "upload_count": int(row[1] or 0),
+                "total_bytes": int(row[2] or 0),
+                "avg_size_bytes": float(row[3]) if row[3] is not None else None,
+                "max_size_bytes": int(row[4]) if row[4] is not None else None,
+            }
+            for row in rows
+        ]
+
+        cur.close()
+        conn.close()
+
+        return {
+            "window_days": days,
+            "total_uploads": sum(item["upload_count"] for item in items),
+            "by_file_type": items,
+        }
+    except Exception as err:
+        logger.warning(f"Upload distribution fetch failed (non-blocking): {err}")
+        return {
+            "window_days": days,
+            "total_uploads": 0,
+            "by_file_type": [],
+            "error": str(err),
+        }

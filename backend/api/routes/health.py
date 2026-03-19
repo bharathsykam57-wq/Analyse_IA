@@ -6,7 +6,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 from backend.monitoring.health import full_health_check
 from backend.monitoring.metrics import render_prometheus_text
-from backend.monitoring.analytics_tracker import get_analytics_summary_sync
+from backend.monitoring.analytics_tracker import (
+    get_analytics_summary_sync,
+    get_analytics_dashboard_cards_sync,
+    get_upload_distribution_sync,
+)
 from backend.utils.redis_config import get_redis_url
 
 router = APIRouter(tags=["health"])
@@ -103,3 +107,23 @@ async def get_analytics_summary(
     """Get aggregated analytics summary for dashboard metrics (ops-only)."""
     _verify_ops_token(x_ops_token)
     return get_analytics_summary_sync(days=days)
+
+
+@router.get("/ops/analytics/dashboard")
+async def get_analytics_dashboard_cards(
+    days: int = Query(default=7, ge=1, le=90),
+    x_ops_token: str | None = Header(default=None),
+):
+    """Get dashboard-ready analytics cards (ops-only)."""
+    _verify_ops_token(x_ops_token)
+    return get_analytics_dashboard_cards_sync(days=days)
+
+
+@router.get("/ops/analytics/uploads")
+async def get_analytics_upload_distribution(
+    days: int = Query(default=7, ge=1, le=90),
+    x_ops_token: str | None = Header(default=None),
+):
+    """Get upload size/type distribution analytics (ops-only)."""
+    _verify_ops_token(x_ops_token)
+    return get_upload_distribution_sync(days=days)
