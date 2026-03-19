@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Optional
 import logging
+import json
+import redis
 from celery.result import AsyncResult
 
 from backend.api.dependencies import get_db
@@ -31,8 +33,14 @@ from backend.api.auth.router import get_current_active_user
 from backend.api.auth.models import User
 from backend.api.celery.tasks import run_agent, publish_progress
 from backend.api.celery.worker import celery_app
+from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
+
+REDIS_URL = get_redis_url()
+TASK_RESULT_CACHE_PREFIX = "task_result"
+USER_TASK_HISTORY_PREFIX = "user_task_history"
+USER_TASK_HISTORY_MAX_ITEMS = 100
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -75,6 +83,38 @@ class CancelResponse(BaseModel):
     task_id: str
     status: str
     message: str
+
+
+def _task_cache_key(task_id: str) -> str:
+    return f"{TASK_RESULT_CACHE_PREFIX}:{task_id}"
+
+
+def _user_history_key(user_id: str) -> str:
+    return f"{USER_TASK_HISTORY_PREFIX}:{user_id}"
+
+
+def _record_user_task(user_id: str, task_id: str):
+    try:
+        r = redis.from_url(REDIS_URL)
+        key = _user_history_key(user_id)
+        r.lpush(key, task_id)
+        r.ltrim(key, 0, USER_TASK_HISTORY_MAX_ITEMS - 1)
+        r.expire(key, 60 * 60 * 24 * 14)
+    except Exception as err:
+        logger.warning(f"Failed to record user task history for user={user_id}: {err}")
+
+
+def _get_cached_task_payload(task_id: str) -> dict | None:
+    try:
+        r = redis.from_url(REDIS_URL)
+        raw = r.get(_task_cache_key(task_id))
+        if not raw:
+            return None
+        decoded = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        return json.loads(decoded)
+    except Exception as err:
+        logger.warning(f"Failed to read cached task payload for task_id={task_id}: {err}")
+        return None
 
 
 @router.post("/ask", response_model=AgentResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -200,6 +240,8 @@ async def ask_agent(
         queue="agent",
     )
 
+    _record_user_task(str(current_user.id), task.id)
+
     logger.info(
         f"Agent task dispatched: {task.id} "
         f"user={current_user.email} "
@@ -249,6 +291,16 @@ async def task_status(
     """
     result = AsyncResult(task_id, app=celery_app)
 
+    if result.status in {"PENDING", "STARTED", "RETRY"}:
+        cached_payload = _get_cached_task_payload(task_id)
+        if cached_payload:
+            return {
+                "task_id": task_id,
+                "status": str(cached_payload.get("status", "completed")).upper(),
+                "cached": True,
+                "payload": cached_payload,
+            }
+
     response = {
         "task_id": task_id,
         "status": result.status,
@@ -263,6 +315,41 @@ async def task_status(
         response["error"] = "Task canceled by user"
 
     return response
+
+
+@router.get("/history/cache")
+def get_cached_task_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return recent cached terminal task payloads for current user."""
+    try:
+        r = redis.from_url(REDIS_URL)
+        key = _user_history_key(str(current_user.id))
+        task_ids_raw = r.lrange(key, 0, limit - 1)
+
+        task_ids = [
+            item.decode("utf-8") if isinstance(item, (bytes, bytearray)) else str(item)
+            for item in task_ids_raw
+        ]
+
+        items = []
+        for task_id in task_ids:
+            payload = _get_cached_task_payload(task_id)
+            if payload:
+                items.append({"task_id": task_id, "payload": payload})
+
+        return {
+            "history": items,
+            "count": len(items),
+            "limit": limit,
+        }
+    except Exception as err:
+        logger.exception(f"Failed to read cached task history for user_id={current_user.id}: {err}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch cached history",
+        )
 
 
 @router.post("/cancel/{task_id}", response_model=CancelResponse)

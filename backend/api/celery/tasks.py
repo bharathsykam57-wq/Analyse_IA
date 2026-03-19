@@ -102,6 +102,8 @@ TASK_WEBHOOK_TIMEOUT_SEC = float(os.getenv("TASK_WEBHOOK_TIMEOUT_SEC", "3"))
 TASK_WEBHOOK_TOKEN = os.getenv("TASK_WEBHOOK_TOKEN")
 CELERY_DLQ_KEY = os.getenv("CELERY_DLQ_KEY", "celery:dead_letter_tasks")
 CELERY_DLQ_MAX_ITEMS = int(os.getenv("CELERY_DLQ_MAX_ITEMS", "1000"))
+TASK_RESULT_CACHE_PREFIX = os.getenv("TASK_RESULT_CACHE_PREFIX", "task_result")
+TASK_RESULT_CACHE_TTL_SEC = int(os.getenv("TASK_RESULT_CACHE_TTL_SEC", "3600"))
 
 
 def _status_to_type(status: str) -> str:
@@ -124,6 +126,12 @@ def _estimate_eta_seconds(status: str) -> int | None:
         "retrying": 30,
     }
     return default_eta.get(status)
+
+
+def _estimate_token_count(text: str | None) -> int:
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
 
 
 def _normalize_progress_payload(task_id: str, data: dict) -> dict:
@@ -150,7 +158,26 @@ def _normalize_progress_payload(task_id: str, data: dict) -> dict:
     payload["can_cancel"] = payload.get("can_cancel", status_value in {"started", "processing", "retrying"})
     payload["emitted_at"] = payload.get("emitted_at") or int(time.time())
 
+    if "token_count_input" not in payload:
+        payload["token_count_input"] = _estimate_token_count(payload.get("input_text"))
+    if "token_count_output" not in payload:
+        payload["token_count_output"] = _estimate_token_count(payload.get("output_text"))
+    payload["token_count_total"] = int(payload.get("token_count_input", 0)) + int(payload.get("token_count_output", 0))
+
     return payload
+
+
+def _cache_terminal_result(task_id: str, payload: dict):
+    status = str(payload.get("status", ""))
+    if status not in {"completed", "failed", "canceled"}:
+        return
+
+    try:
+        r = redis.from_url(REDIS_URL)
+        cache_key = f"{TASK_RESULT_CACHE_PREFIX}:{task_id}"
+        r.setex(cache_key, TASK_RESULT_CACHE_TTL_SEC, json.dumps(payload))
+    except Exception as cache_err:
+        logger.warning(f"Failed to cache terminal task payload for {task_id}: {cache_err}")
 
 
 def _send_task_status_webhook(payload: dict):
@@ -257,6 +284,7 @@ def publish_progress(task_id: str, data: dict):
 
     # Webhook dispatch is intentionally independent from Redis availability.
     _send_task_status_webhook(payload)
+    _cache_terminal_result(task_id, payload)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -524,6 +552,7 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
             "status": "started",
             "task_id": task_id,
             "message": "Analyse en cours..." if language == "fr" else "Analysis in progress...",
+            "input_text": query,
         })
 
         # Lazy import to prevent circular dependencies at module load time
@@ -552,6 +581,8 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
             "status": "completed",
             "task_id": task_id,
             "result": result,
+            "input_text": query,
+            "output_text": result.get("answer", "") if isinstance(result, dict) else "",
         })
 
         try:
