@@ -17,6 +17,8 @@ Authorization: Bearer {access_token}
 
 These are the active endpoints used by async agent runs and realtime UI updates.
 
+> Source of truth: implement frontend integrations from this section first.
+
 ### POST `/api/v1/agent/ask`
 Queue a new async task.
 
@@ -145,7 +147,10 @@ Realtime progress stream.
 
 ---
 
-## 1. History Endpoints
+## 1. History Endpoints (Planned / Legacy)
+
+> Note: The routes in this section are not the current backend source of truth.
+> Use the Task Streaming section above for implemented contracts.
 
 ### GET `/api/history`
 Fetch paginated history of queries with filtering.
@@ -203,7 +208,9 @@ Export history as file.
 
 ---
 
-## 2. Export Endpoints
+## 2. Export Endpoints (Planned / Legacy)
+
+> Note: Validate backend availability before integrating these routes.
 
 ### GET `/api/exports/stats`
 Get export statistics.
@@ -243,7 +250,9 @@ Export all data.
 
 ---
 
-## 3. Settings Endpoints
+## 3. Settings Endpoints (Planned / Legacy)
+
+> Note: Validate backend availability before integrating these routes.
 
 ### GET `/api/settings`
 Get user settings.
@@ -334,7 +343,9 @@ Delete user account and all associated data.
 
 ---
 
-## 4. Account Endpoints
+## 4. Account Endpoints (Planned / Legacy)
+
+> Note: Validate backend availability before integrating these routes.
 
 ### GET `/api/account`
 Get account information.
@@ -428,7 +439,9 @@ Logout from a specific session.
 
 ---
 
-## 5. GDPR Endpoints
+## 5. GDPR Endpoints (Partially Implemented)
+
+> Note: Current implemented RGPD routes are under `/api/v1/rgpd/*`.
 
 ### GET `/api/gdpr/export`
 Export all personal data as file.
@@ -472,7 +485,9 @@ Update consent preferences.
 
 ---
 
-## 6. Documentation Endpoints
+## 6. Documentation Endpoints (Planned / Legacy)
+
+> Note: Validate backend availability before integrating these routes.
 
 ### GET `/api/docs/faq/search`
 Search FAQs.
