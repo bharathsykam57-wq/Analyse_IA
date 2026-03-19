@@ -43,6 +43,7 @@ jobs:
 
       - name: Run focused backend regressions
         run: |
+          python tests/test_automl_estimator_mapping.py
           python tests/test_automl_search_space.py
           python tests/test_rate_limit_utils.py
           python tests/test_rate_limit_endpoints.py
