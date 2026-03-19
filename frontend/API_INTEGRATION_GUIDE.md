@@ -3,12 +3,144 @@
 This document outlines all the API endpoints required to fully integrate the frontend dashboard with the backend.
 
 ## Base URL
-All endpoints should be prefixed with `/api/`
+All endpoints should be prefixed with `/api/v1/`
 
 ## Authentication
 All endpoints require Bearer token authentication via `Authorization` header:
 ```
 Authorization: Bearer {access_token}
+```
+
+---
+
+## Task Streaming (Current Backend Contract)
+
+These are the active endpoints used by async agent runs and realtime UI updates.
+
+### POST `/api/v1/agent/ask`
+Queue a new async task.
+
+**Request Body:**
+```json
+{
+  "query": "Analyze this dataset",
+  "session_id": "optional-session-id",
+  "file_id": "optional-file-id",
+  "language": "fr"
+}
+```
+
+**Response:**
+```json
+{
+  "task_id": "uuid",
+  "session_id": "string",
+  "status": "queued",
+  "message": "Request being processed..."
+}
+```
+
+### GET `/api/v1/agent/status/{task_id}`
+Polling fallback endpoint.
+
+**Response (running):**
+```json
+{
+  "task_id": "uuid",
+  "status": "STARTED"
+}
+```
+
+**Response (cached terminal fallback):**
+```json
+{
+  "task_id": "uuid",
+  "status": "COMPLETED",
+  "cached": true,
+  "payload": {
+    "status": "completed",
+    "progress_percent": 100,
+    "token_count_total": 123,
+    "result": {}
+  }
+}
+```
+
+### POST `/api/v1/agent/cancel/{task_id}`
+Best-effort cancel for running task.
+
+**Response:**
+```json
+{
+  "task_id": "uuid",
+  "status": "canceled",
+  "message": "Task cancellation requested."
+}
+```
+
+### GET `/api/v1/agent/task/{task_id}/summary`
+Unified frontend-friendly state endpoint.
+
+**Response:**
+```json
+{
+  "task_id": "uuid",
+  "status": "completed",
+  "terminal": true,
+  "source": "celery|cache",
+  "can_cancel": false,
+  "result": {},
+  "error": null,
+  "payload": {}
+}
+```
+
+### GET `/api/v1/agent/history/cache?limit=20`
+Recent cached terminal payloads for current user.
+
+**Response:**
+```json
+{
+  "history": [
+    {
+      "task_id": "uuid",
+      "payload": {
+        "status": "completed",
+        "progress_percent": 100,
+        "token_count_total": 250,
+        "result": {}
+      }
+    }
+  ],
+  "count": 1,
+  "limit": 20
+}
+```
+
+### WebSocket `/api/v1/ws/{task_id}?token={access_token}`
+Realtime progress stream.
+
+**Progress payload fields to consume in frontend:**
+- `status`: `started|processing|retrying|completed|failed|canceled`
+- `type`: `started|processing|progress|result|error|heartbeat`
+- `progress_percent`: integer (0-100)
+- `eta_seconds`: integer or null
+- `can_cancel`: boolean
+- `reconnect_after_seconds`: integer
+- `token_count_input`, `token_count_output`, `token_count_total`: integers
+- `emitted_at`: unix timestamp (seconds)
+
+**Heartbeat example:**
+```json
+{
+  "status": "processing",
+  "type": "heartbeat",
+  "task_id": "uuid",
+  "message": "Waiting for task updates",
+  "can_cancel": true,
+  "reconnect_after_seconds": 3,
+  "emitted_at": 1773912000
+}
 ```
 
 ---
@@ -499,3 +631,105 @@ X-RateLimit-Reset: 1234567890
 ✅ Success confirmations implemented
 
 **Ready for backend integration!**
+
+---
+
+## 8. Task Streaming & Control (Task 12)
+
+Use `/api/v1` prefixed endpoints for async agent orchestration.
+
+### POST `/api/v1/agent/ask`
+Queue a new agent task.
+
+**Request Body:**
+```json
+{
+  "query": "Analyze my dataset",
+  "session_id": "optional-session-id",
+  "file_id": "optional-file-id",
+  "language": "fr"
+}
+```
+
+**Response (202):**
+```json
+{
+  "task_id": "uuid",
+  "session_id": "string",
+  "status": "queued",
+  "message": "Requête en cours de traitement..."
+}
+```
+
+### GET `/api/v1/agent/status/{task_id}`
+Fallback polling endpoint.
+
+**Response:**
+```json
+{
+  "task_id": "uuid",
+  "status": "PENDING|STARTED|SUCCESS|FAILURE|CANCELED",
+  "result": {},
+  "error": "string",
+  "cached": true,
+  "payload": {}
+}
+```
+
+### POST `/api/v1/agent/cancel/{task_id}`
+Request cancel for running task.
+
+**Response:**
+```json
+{
+  "task_id": "uuid",
+  "status": "canceled",
+  "message": "Task cancellation requested."
+}
+```
+
+### GET `/api/v1/agent/task/{task_id}/summary`
+Single frontend-friendly summary endpoint (recommended).
+
+**Response:**
+```json
+{
+  "task_id": "uuid",
+  "status": "started|pending|completed|failed|canceled",
+  "terminal": false,
+  "source": "celery|cache",
+  "can_cancel": true,
+  "result": {},
+  "error": "string",
+  "payload": {}
+}
+```
+
+### GET `/api/v1/agent/history/cache?limit=20`
+Returns recent terminal cached payloads for current user.
+
+### WebSocket `/api/v1/ws/{task_id}?token={access_token}`
+Real-time progress stream.
+
+**Progress Payload Fields (important):**
+- `status`: `started|processing|retrying|completed|failed|canceled`
+- `type`: `started|processing|progress|result|error|heartbeat`
+- `progress_percent`: `0..100`
+- `eta_seconds`: integer or null
+- `can_cancel`: boolean
+- `reconnect_after_seconds`: integer (frontend reconnect hint)
+- `emitted_at`: unix epoch seconds
+- `token_count_input`, `token_count_output`, `token_count_total`
+
+**Terminal Conditions:**
+- Treat `completed`, `failed`, `canceled` as terminal.
+- Also treat WebSocket close after terminal payload as normal.
+
+### Frontend Handling Recommendation
+
+1. Start with `POST /api/v1/agent/ask`.
+2. Connect WebSocket immediately.
+3. Update progress bar from `progress_percent`.
+4. Show ETA using `eta_seconds` when available.
+5. Enable/disable cancel button from `can_cancel`.
+6. On reconnect, call `GET /api/v1/agent/task/{task_id}/summary` to recover state.
