@@ -9,13 +9,15 @@ See `DOCKER_COMPOSE_FULLSTACK.md` for one-command local deployment (backend + wo
 
 GitHub Actions workflow: `.github/workflows/ci-cd.yml`
 
+Manual deploy workflow: `.github/workflows/deploy-railway.yml`
+
 Includes:
 - Backend tests + syntax/lint checks
 - Frontend lint + build
 - Python dependency security scan (`pip-audit`)
 - Lightweight performance smoke benchmark
-- Optional Railway deploy on `main`
+- Optional manual Railway deploy (workflow dispatch)
 
-Optional deploy secrets:
-- `RAILWAY_TOKEN`
-- `RAILWAY_SERVICE`
+Manual deploy inputs (workflow dispatch):
+- `railway_token`
+- `railway_service`

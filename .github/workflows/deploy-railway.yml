@@ -1,0 +1,57 @@
+name: Deploy Railway
+
+on:
+  workflow_dispatch:
+    inputs:
+      railway_service:
+        description: "Railway service name (overrides secret if provided)"
+        required: true
+        type: string
+      railway_token:
+        description: "Railway token for CLI deploy"
+        required: true
+        type: string
+      ref:
+        description: "Git ref to deploy"
+        required: false
+        default: "main"
+        type: string
+
+jobs:
+  deploy:
+    name: Manual Railway Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Validate required secrets
+        env:
+          RAILWAY_TOKEN: ${{ inputs.railway_token }}
+          RAILWAY_SERVICE: ${{ inputs.railway_service }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "Railway token input is missing"
+            exit 1
+          fi
+          if [ -z "$RAILWAY_SERVICE" ]; then
+            echo "Railway service input is missing"
+            exit 1
+          fi
+
+      - name: Trigger Railway deploy
+        env:
+          RAILWAY_TOKEN: ${{ inputs.railway_token }}
+          RAILWAY_SERVICE: ${{ inputs.railway_service }}
+        run: railway up --service "$RAILWAY_SERVICE" --detach
