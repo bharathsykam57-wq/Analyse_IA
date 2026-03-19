@@ -26,6 +26,8 @@ def main() -> int:
             "count": 3,
             "ttl_sec": 25,
             "window_sec": window_sec,
+            "strikes": 2,
+            "penalty_multiplier": 1,
         }
 
         unauth = client.get("/api/v1/ops/rate-limit/state?scope=auth_login:ip&identity=1.2.3.4")
@@ -44,6 +46,9 @@ def main() -> int:
         body = auth.json()
         if body.get("count") != 3 or body.get("ttl_sec") != 25:
             print("FAIL: unexpected rate-limit state payload")
+            return 1
+        if body.get("strikes") != 2:
+            print("FAIL: missing strike count")
             return 1
 
         print("PASS: ops rate-limit state endpoint checks passed")

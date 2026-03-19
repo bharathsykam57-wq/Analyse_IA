@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 
 RATE_LIMIT_PREFIX = os.getenv("RATE_LIMIT_PREFIX", "rate_limit")
 DEFAULT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))
+OFFENDER_PREFIX = os.getenv("RATE_LIMIT_OFFENDER_PREFIX", "rate_limit_offender")
+OFFENDER_TRACK_WINDOW_SEC = int(os.getenv("RATE_LIMIT_OFFENDER_TRACK_WINDOW_SEC", "3600"))
+OFFENDER_STAGE_1_THRESHOLD = int(os.getenv("RATE_LIMIT_OFFENDER_STAGE_1_THRESHOLD", "3"))
+OFFENDER_STAGE_2_THRESHOLD = int(os.getenv("RATE_LIMIT_OFFENDER_STAGE_2_THRESHOLD", "6"))
+OFFENDER_STAGE_3_THRESHOLD = int(os.getenv("RATE_LIMIT_OFFENDER_STAGE_3_THRESHOLD", "10"))
+OFFENDER_STAGE_1_MULTIPLIER = int(os.getenv("RATE_LIMIT_OFFENDER_STAGE_1_MULTIPLIER", "2"))
+OFFENDER_STAGE_2_MULTIPLIER = int(os.getenv("RATE_LIMIT_OFFENDER_STAGE_2_MULTIPLIER", "5"))
+OFFENDER_STAGE_3_MULTIPLIER = int(os.getenv("RATE_LIMIT_OFFENDER_STAGE_3_MULTIPLIER", "10"))
 
 
 def _client_ip(request: Request) -> str:
@@ -29,6 +37,20 @@ def _key(scope: str, identity: str, window_sec: int) -> str:
     return f"{RATE_LIMIT_PREFIX}:{scope}:{identity}:{window_sec}"
 
 
+def _offender_key(scope: str, identity: str) -> str:
+    return f"{OFFENDER_PREFIX}:{scope}:{identity}"
+
+
+def _penalty_multiplier(strikes: int) -> int:
+    if strikes >= OFFENDER_STAGE_3_THRESHOLD:
+        return OFFENDER_STAGE_3_MULTIPLIER
+    if strikes >= OFFENDER_STAGE_2_THRESHOLD:
+        return OFFENDER_STAGE_2_MULTIPLIER
+    if strikes >= OFFENDER_STAGE_1_THRESHOLD:
+        return OFFENDER_STAGE_1_MULTIPLIER
+    return 1
+
+
 def build_rate_limit_headers(limit: int, remaining: int, reset_sec: int) -> dict[str, str]:
     return {
         "X-RateLimit-Limit": str(max(limit, 0)),
@@ -42,16 +64,21 @@ def get_rate_limit_state(*, scope: str, identity: str, window_sec: int = DEFAULT
     try:
         r = redis.from_url(get_redis_url())
         k = _key(scope, identity, window_sec)
+        offender_k = _offender_key(scope, identity)
         current = r.get(k)
         ttl = int(r.ttl(k))
+        strikes = int(r.get(offender_k) or 0)
         count = int(current or 0)
         if ttl < 0:
             ttl = window_sec
+        multiplier = _penalty_multiplier(strikes)
         return {
             "key": k,
             "count": count,
             "ttl_sec": ttl,
             "window_sec": window_sec,
+            "strikes": strikes,
+            "penalty_multiplier": multiplier,
         }
     except Exception as err:
         logger.warning(f"Rate limit inspect unavailable for scope={scope}: {err}")
@@ -60,6 +87,8 @@ def get_rate_limit_state(*, scope: str, identity: str, window_sec: int = DEFAULT
             "count": 0,
             "ttl_sec": window_sec,
             "window_sec": window_sec,
+            "strikes": 0,
+            "penalty_multiplier": 1,
         }
 
 
@@ -81,19 +110,27 @@ def enforce_rate_limit(
 
     try:
         r = redis.from_url(get_redis_url())
-        k = _key(scope, identity, window_sec)
+        offender_k = _offender_key(scope, identity)
+        strikes = int(r.get(offender_k) or 0)
+        multiplier = _penalty_multiplier(strikes)
+        effective_window_sec = window_sec * multiplier
+
+        k = _key(scope, identity, effective_window_sec)
         count = int(r.incr(k))
         if count == 1:
-            r.expire(k, window_sec)
+            r.expire(k, effective_window_sec)
 
         ttl = int(r.ttl(k))
         if ttl < 0:
-            ttl = window_sec
+            ttl = effective_window_sec
 
         remaining = max(limit - count, 0)
         headers = build_rate_limit_headers(limit=limit, remaining=remaining, reset_sec=ttl)
 
         if count > limit:
+            offender_count = int(r.incr(offender_k))
+            if offender_count == 1:
+                r.expire(offender_k, OFFENDER_TRACK_WINDOW_SEC)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=message,

@@ -68,6 +68,21 @@ def main() -> int:
                 print(f"FAIL: expected 429 got {exc.status_code}")
                 return 1
 
+        # Trigger multiple violations to increase offender strike count.
+        for _ in range(3):
+            try:
+                rl.enforce_ip_rate_limit(request=req, scope="unit", limit=1, window_sec=60)
+            except HTTPException:
+                pass
+
+        state = rl.get_rate_limit_state(scope="unit:ip", identity="10.0.0.1", window_sec=60)
+        if int(state.get("strikes", 0)) < 3:
+            print("FAIL: expected offender strikes to increment")
+            return 1
+        if int(state.get("penalty_multiplier", 1)) < 2:
+            print("FAIL: expected penalty multiplier escalation")
+            return 1
+
         print("PASS: rate limit utility checks passed")
         return 0
     finally:
