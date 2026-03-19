@@ -32,6 +32,7 @@ from backend.api.routes.health import router as health_router
 from backend.api.auth.router import router as auth_router
 from backend.api.routes.files import router as files_router
 from backend.api.routes.agent import router as agent_router
+from backend.api.routes.analytics import router as analytics_router
 from backend.api.websocket.router import router as ws_router
 from backend.api.rgpd.router import router as rgpd_router
 from backend.monitoring.metrics import record_http_request
@@ -185,6 +186,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(files_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(ws_router, prefix="/api/v1")
 app.include_router(rgpd_router, prefix="/api/v1")
 

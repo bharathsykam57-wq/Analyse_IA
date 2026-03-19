@@ -249,3 +249,127 @@ def get_upload_distribution_sync(days: int = 7) -> dict[str, Any]:
             "by_file_type": [],
             "error": str(err),
         }
+
+
+def get_user_activity_overview_sync(user_id: str, days: int = 7) -> dict[str, Any]:
+    try:
+        conn = psycopg2.connect(_conn_str())
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT event_type, COUNT(*)
+            FROM analytics_events
+            WHERE user_id = %s
+              AND created_at >= NOW() - (%s * INTERVAL '1 day')
+            GROUP BY event_type
+            """,
+            (user_id, days),
+        )
+        event_counts = {row[0]: int(row[1] or 0) for row in cur.fetchall()}
+
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(file_size_bytes), 0)
+            FROM analytics_events
+            WHERE user_id = %s
+              AND event_type = 'file_upload'
+              AND created_at >= NOW() - (%s * INTERVAL '1 day')
+            """,
+            (user_id, days),
+        )
+        total_upload_bytes = int((cur.fetchone() or [0])[0] or 0)
+
+        cur.close()
+        conn.close()
+
+        return {
+            "window_days": days,
+            "user_id": user_id,
+            "cards": {
+                "logins": event_counts.get("user_login", 0),
+                "uploads": event_counts.get("file_upload", 0),
+                "analysis_requests": event_counts.get("analysis_requested", 0),
+                "cancellations": event_counts.get("task_canceled", 0),
+                "total_upload_bytes": total_upload_bytes,
+            },
+            "events_by_type": [
+                {"event_type": key, "count": value}
+                for key, value in sorted(event_counts.items())
+            ],
+        }
+    except Exception as err:
+        logger.warning(f"User activity overview fetch failed (non-blocking): {err}")
+        return {
+            "window_days": days,
+            "user_id": user_id,
+            "cards": {
+                "logins": 0,
+                "uploads": 0,
+                "analysis_requests": 0,
+                "cancellations": 0,
+                "total_upload_bytes": 0,
+            },
+            "events_by_type": [],
+            "error": str(err),
+        }
+
+
+def get_analysis_performance_timeseries_sync(days: int = 7) -> dict[str, Any]:
+    try:
+        conn = psycopg2.connect(_conn_str())
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT
+                summary_date,
+                event_type,
+                total_count,
+                success_count,
+                failure_count,
+                avg_duration_ms
+            FROM metrics_summary
+            WHERE summary_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+              AND event_type IN ('analysis_requested', 'task_execution')
+            ORDER BY summary_date ASC
+            """,
+            (days,),
+        )
+
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        daily: dict[str, dict[str, Any]] = {}
+        for summary_date, event_type, total_count, success_count, failure_count, avg_duration_ms in rows:
+            key = summary_date.isoformat()
+            if key not in daily:
+                daily[key] = {
+                    "date": key,
+                    "analysis_requests": 0,
+                    "analysis_avg_duration_ms": None,
+                    "task_executions": 0,
+                    "task_success_rate": None,
+                }
+
+            if event_type == "analysis_requested":
+                daily[key]["analysis_requests"] = int(total_count or 0)
+                daily[key]["analysis_avg_duration_ms"] = float(avg_duration_ms) if avg_duration_ms is not None else None
+            elif event_type == "task_execution":
+                total = int(total_count or 0)
+                success = int(success_count or 0)
+                daily[key]["task_executions"] = total
+                daily[key]["task_success_rate"] = (success / total) if total else None
+
+        return {
+            "window_days": days,
+            "series": [daily[k] for k in sorted(daily.keys())],
+        }
+    except Exception as err:
+        logger.warning(f"Analysis performance series fetch failed (non-blocking): {err}")
+        return {
+            "window_days": days,
+            "series": [],
+            "error": str(err),
+        }
