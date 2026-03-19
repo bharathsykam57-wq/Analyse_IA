@@ -111,15 +111,45 @@ def _status_to_type(status: str) -> str:
         "retrying": "progress",
         "completed": "result",
         "failed": "error",
+        "canceled": "error",
     }
     return mapping.get(status, "progress")
+
+
+def _estimate_eta_seconds(status: str) -> int | None:
+    # Conservative heuristic for UI feedback until model-based ETA is introduced.
+    default_eta = {
+        "started": 120,
+        "processing": 60,
+        "retrying": 30,
+    }
+    return default_eta.get(status)
 
 
 def _normalize_progress_payload(task_id: str, data: dict) -> dict:
     payload = {**data}
     payload["task_id"] = task_id
-    status_value = payload.get("status", "processing")
-    payload["type"] = payload.get("type") or _status_to_type(str(status_value))
+    status_value = str(payload.get("status", "processing"))
+    payload["type"] = payload.get("type") or _status_to_type(status_value)
+
+    progress_map = {
+        "started": 5,
+        "processing": 50,
+        "retrying": 40,
+        "completed": 100,
+        "failed": 100,
+        "canceled": 100,
+    }
+    payload["progress_percent"] = payload.get("progress_percent", progress_map.get(status_value, 0))
+
+    eta_seconds = payload.get("eta_seconds")
+    if eta_seconds is None:
+        eta_seconds = _estimate_eta_seconds(status_value)
+    payload["eta_seconds"] = eta_seconds
+
+    payload["can_cancel"] = payload.get("can_cancel", status_value in {"started", "processing", "retrying"})
+    payload["emitted_at"] = payload.get("emitted_at") or int(time.time())
+
     return payload
 
 

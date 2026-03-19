@@ -145,7 +145,7 @@ class ConnectionManager:
                 await websocket.send_json(data)
                 logger.debug(f"Streamed to {task_id}: {data.get('status')}")
 
-                if data.get("status") in ("completed", "failed"):
+                if data.get("status") in ("completed", "failed", "canceled"):
                     break
 
         except Exception as e:

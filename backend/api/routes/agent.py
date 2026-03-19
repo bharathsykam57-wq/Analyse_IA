@@ -24,11 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Optional
 import logging
+from celery.result import AsyncResult
 
 from backend.api.dependencies import get_db
 from backend.api.auth.router import get_current_active_user
 from backend.api.auth.models import User
-from backend.api.celery.tasks import run_agent
+from backend.api.celery.tasks import run_agent, publish_progress
+from backend.api.celery.worker import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,12 @@ class AgentResponse(BaseModel):
     task_id: str
     session_id: str
     status: str = "queued"
+    message: str
+
+
+class CancelResponse(BaseModel):
+    task_id: str
+    status: str
     message: str
 
 
@@ -239,9 +247,6 @@ async def task_status(
     Returns:
         dict with task_id, status, and conditional result/error fields.
     """
-    from backend.api.celery.worker import celery_app
-    from celery.result import AsyncResult
-
     result = AsyncResult(task_id, app=celery_app)
 
     response = {
@@ -253,8 +258,55 @@ async def task_status(
         response["result"] = result.result
     elif result.status == "FAILURE":
         response["error"] = str(result.result)
+    elif result.status == "REVOKED":
+        response["status"] = "CANCELED"
+        response["error"] = "Task canceled by user"
 
     return response
+
+
+@router.post("/cancel/{task_id}", response_model=CancelResponse)
+async def cancel_task(
+    task_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Cancel an in-flight Celery task.
+
+    Notes:
+    - Uses Celery revoke(terminate=True) for best-effort termination.
+    - Emits a terminal `canceled` progress event for WebSocket clients.
+    """
+    result = AsyncResult(task_id, app=celery_app)
+
+    if result.status in {"SUCCESS", "FAILURE", "REVOKED"}:
+        terminal_status = "canceled" if result.status == "REVOKED" else result.status.lower()
+        return CancelResponse(
+            task_id=task_id,
+            status=terminal_status,
+            message="Task already finished.",
+        )
+
+    result.revoke(terminate=True, signal="SIGTERM")
+    publish_progress(
+        task_id,
+        {
+            "status": "canceled",
+            "message": "Task canceled by user",
+            "error": "Task canceled by user",
+            "error_code": "task_canceled",
+            "can_cancel": False,
+            "progress_percent": 100,
+            "eta_seconds": 0,
+            "canceled_by": str(current_user.id),
+        },
+    )
+
+    logger.info(f"Task canceled: task_id={task_id} user={current_user.email}")
+    return CancelResponse(
+        task_id=task_id,
+        status="canceled",
+        message="Task cancellation requested.",
+    )
 
 
 def _parse_accept_language(header: Optional[str]) -> Optional[str]:
