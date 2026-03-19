@@ -21,6 +21,9 @@ def main() -> int:
     if started.get("can_cancel") is not True:
         print("FAIL: started can_cancel")
         return 1
+    if started.get("reconnect_after_seconds") is None:
+        print("FAIL: started reconnect_after_seconds missing")
+        return 1
 
     canceled = _normalize_progress_payload("t2", {"status": "canceled"})
     if canceled.get("type") != "error":
@@ -31,6 +34,9 @@ def main() -> int:
         return 1
     if canceled.get("progress_percent") != 100:
         print("FAIL: canceled progress percent")
+        return 1
+    if canceled.get("reconnect_after_seconds") is None:
+        print("FAIL: canceled reconnect_after_seconds missing")
         return 1
 
     print("PASS: progress payload checks passed")

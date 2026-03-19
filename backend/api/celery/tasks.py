@@ -104,6 +104,7 @@ CELERY_DLQ_KEY = os.getenv("CELERY_DLQ_KEY", "celery:dead_letter_tasks")
 CELERY_DLQ_MAX_ITEMS = int(os.getenv("CELERY_DLQ_MAX_ITEMS", "1000"))
 TASK_RESULT_CACHE_PREFIX = os.getenv("TASK_RESULT_CACHE_PREFIX", "task_result")
 TASK_RESULT_CACHE_TTL_SEC = int(os.getenv("TASK_RESULT_CACHE_TTL_SEC", "3600"))
+PROGRESS_RECONNECT_AFTER_SEC = int(os.getenv("PROGRESS_RECONNECT_AFTER_SEC", "3"))
 
 
 def _status_to_type(status: str) -> str:
@@ -156,6 +157,7 @@ def _normalize_progress_payload(task_id: str, data: dict) -> dict:
     payload["eta_seconds"] = eta_seconds
 
     payload["can_cancel"] = payload.get("can_cancel", status_value in {"started", "processing", "retrying"})
+    payload["reconnect_after_seconds"] = int(payload.get("reconnect_after_seconds", PROGRESS_RECONNECT_AFTER_SEC))
     payload["emitted_at"] = payload.get("emitted_at") or int(time.time())
 
     if "token_count_input" not in payload:

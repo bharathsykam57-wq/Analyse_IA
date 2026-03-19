@@ -20,11 +20,26 @@ import json
 import logging
 import redis.asyncio as aioredis
 import os
+import time
 from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
 
 REDIS_URL = get_redis_url()
+WS_HEARTBEAT_INTERVAL_SEC = float(os.getenv("WS_HEARTBEAT_INTERVAL_SEC", "15"))
+WS_RECONNECT_AFTER_SEC = int(os.getenv("WS_RECONNECT_AFTER_SEC", "3"))
+
+
+def _heartbeat_payload(task_id: str) -> dict:
+    return {
+        "status": "processing",
+        "type": "heartbeat",
+        "task_id": task_id,
+        "message": "Waiting for task updates",
+        "can_cancel": True,
+        "reconnect_after_seconds": WS_RECONNECT_AFTER_SEC,
+        "emitted_at": int(time.time()),
+    }
 
 
 class ConnectionManager:
@@ -118,8 +133,14 @@ class ConnectionManager:
         logger.info(f"Subscribed to Redis channel: {channel}")
 
         try:
-            async for message in pubsub.listen():
-                if message["type"] != "message":
+            while True:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=WS_HEARTBEAT_INTERVAL_SEC,
+                )
+
+                if message is None:
+                    await websocket.send_json(_heartbeat_payload(task_id))
                     continue
 
                 try:
