@@ -66,6 +66,11 @@ def main() -> int:
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many login attempts. Please retry in one minute.",
             )
+        return {
+            "X-RateLimit-Limit": "20",
+            "X-RateLimit-Remaining": "19",
+            "X-RateLimit-Reset": "60",
+        }
 
     def _agent_rl(*args, **kwargs):
         agent_calls["n"] += 1
@@ -74,6 +79,11 @@ def main() -> int:
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many analysis requests for this account. Please retry in one minute.",
             )
+        return {
+            "X-RateLimit-Limit": "20",
+            "X-RateLimit-Remaining": "19",
+            "X-RateLimit-Reset": "60",
+        }
 
     try:
         auth_module.login_user = lambda req, db: _DummyAuthUser()
@@ -89,6 +99,15 @@ def main() -> int:
         )
         if ok_login.status_code != 200:
             print(f"FAIL: first login expected 200 got {ok_login.status_code}")
+            return 1
+        if ok_login.headers.get("X-RateLimit-Limit") is None:
+            print("FAIL: login missing X-RateLimit-Limit header")
+            return 1
+        if ok_login.headers.get("X-RateLimit-Remaining") is None:
+            print("FAIL: login missing X-RateLimit-Remaining header")
+            return 1
+        if ok_login.headers.get("X-RateLimit-Reset") is None:
+            print("FAIL: login missing X-RateLimit-Reset header")
             return 1
 
         # Second login blocked.
@@ -111,6 +130,15 @@ def main() -> int:
         )
         if ok_ask.status_code != 202:
             print(f"FAIL: first ask expected 202 got {ok_ask.status_code} -> {ok_ask.text}")
+            return 1
+        if ok_ask.headers.get("X-RateLimit-Limit") is None:
+            print("FAIL: ask missing X-RateLimit-Limit header")
+            return 1
+        if ok_ask.headers.get("X-RateLimit-Remaining") is None:
+            print("FAIL: ask missing X-RateLimit-Remaining header")
+            return 1
+        if ok_ask.headers.get("X-RateLimit-Reset") is None:
+            print("FAIL: ask missing X-RateLimit-Reset header")
             return 1
 
         # Second ask blocked by limiter.

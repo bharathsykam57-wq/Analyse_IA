@@ -18,7 +18,7 @@ Integration:
   Frontend receives real-time updates via: ws://host/ws/tasks/{task_id}
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -137,6 +137,7 @@ async def ask_agent(
     db: Session = Depends(get_db),
     accept_language: Optional[str] = Header(None),
     http_request: Request = None,
+    response: Response = None,
 ):
     """Dispatch agent query to Celery for async multi-phase analysis.
     
@@ -177,7 +178,7 @@ async def ask_agent(
             window_sec=60,
             message="Too many requests from this IP. Please retry in one minute.",
         )
-        enforce_user_rate_limit(
+        rl_headers = enforce_user_rate_limit(
             request=http_request,
             scope="agent_ask",
             user_id=str(current_user.id),
@@ -185,6 +186,9 @@ async def ask_agent(
             window_sec=60,
             message="Too many analysis requests for this account. Please retry in one minute.",
         )
+        if response is not None:
+            for key, value in (rl_headers or {}).items():
+                response.headers[key] = value
 
     session_id = request.session_id or f"{current_user.id}"
 
@@ -472,6 +476,7 @@ async def cancel_task(
     task_id: str,
     current_user: User = Depends(get_current_active_user),
     http_request: Request = None,
+    response: Response = None,
 ):
     """Cancel an in-flight Celery task.
 
@@ -480,7 +485,7 @@ async def cancel_task(
     - Emits a terminal `canceled` progress event for WebSocket clients.
     """
     if http_request is not None:
-        enforce_user_rate_limit(
+        rl_headers = enforce_user_rate_limit(
             request=http_request,
             scope="agent_cancel",
             user_id=str(current_user.id),
@@ -488,6 +493,9 @@ async def cancel_task(
             window_sec=60,
             message="Too many cancellation requests. Please retry in one minute.",
         )
+        if response is not None:
+            for key, value in (rl_headers or {}).items():
+                response.headers[key] = value
 
     result = AsyncResult(task_id, app=celery_app)
 

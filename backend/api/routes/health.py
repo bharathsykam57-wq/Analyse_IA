@@ -11,6 +11,7 @@ from backend.monitoring.analytics_tracker import (
     get_analytics_dashboard_cards_sync,
     get_upload_distribution_sync,
 )
+from backend.api.security.rate_limit import get_rate_limit_state
 from backend.utils.redis_config import get_redis_url
 
 router = APIRouter(tags=["health"])
@@ -127,3 +128,15 @@ async def get_analytics_upload_distribution(
     """Get upload size/type distribution analytics (ops-only)."""
     _verify_ops_token(x_ops_token)
     return get_upload_distribution_sync(days=days)
+
+
+@router.get("/ops/rate-limit/state")
+async def get_rate_limit_inspection(
+    scope: str = Query(..., min_length=1),
+    identity: str = Query(..., min_length=1),
+    window_sec: int = Query(default=60, ge=1, le=3600),
+    x_ops_token: str | None = Header(default=None),
+):
+    """Inspect fixed-window rate-limit counter state for a scope/identity pair (ops-only)."""
+    _verify_ops_token(x_ops_token)
+    return get_rate_limit_state(scope=scope, identity=identity, window_sec=window_sec)

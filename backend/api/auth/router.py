@@ -44,7 +44,7 @@ HTTP Status Codes:
     500 Server Error  → Database connection, unexpected errors
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_db
@@ -309,6 +309,7 @@ async def register(
     request: RegisterRequest,
     db: Session = Depends(get_db),
     http_request: Request = None,
+    response: Response = None,
 ):
     """Create a new user account with bcrypt password hashing and initial token pair.
 
@@ -501,13 +502,16 @@ async def register(
     """
     start = time.time()
     if http_request is not None:
-        enforce_ip_rate_limit(
+        rl_headers = enforce_ip_rate_limit(
             request=http_request,
             scope="auth_register",
             limit=10,
             window_sec=60,
             message="Too many registration attempts. Please retry in one minute.",
         )
+        if response is not None:
+            for key, value in (rl_headers or {}).items():
+                response.headers[key] = value
     try:
         user = register_user(request, db)
         access_token, expires_in = create_access_token(user.id, user.email)
@@ -553,6 +557,7 @@ async def login(
     request: LoginRequest,
     db: Session = Depends(get_db),
     http_request: Request = None,
+    response: Response = None,
 ):
     """Authenticate user with email/password, return JWT and refresh tokens.
 
@@ -778,13 +783,16 @@ async def login(
     """
     start = time.time()
     if http_request is not None:
-        enforce_ip_rate_limit(
+        rl_headers = enforce_ip_rate_limit(
             request=http_request,
             scope="auth_login",
             limit=20,
             window_sec=60,
             message="Too many login attempts. Please retry in one minute.",
         )
+        if response is not None:
+            for key, value in (rl_headers or {}).items():
+                response.headers[key] = value
     try:
         user = login_user(request, db)
         access_token, expires_in = create_access_token(user.id, user.email)

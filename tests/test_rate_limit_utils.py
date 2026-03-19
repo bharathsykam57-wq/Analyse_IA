@@ -16,13 +16,23 @@ import backend.api.security.rate_limit as rl
 class _FakeRedis:
     def __init__(self):
         self.counters = {}
+        self.ttls = {}
 
     def incr(self, key):
         self.counters[key] = int(self.counters.get(key, 0)) + 1
         return self.counters[key]
 
     def expire(self, key, window_sec):
+        self.ttls[key] = window_sec
         return True
+
+    def get(self, key):
+        if key not in self.counters:
+            return None
+        return str(self.counters[key]).encode("utf-8")
+
+    def ttl(self, key):
+        return int(self.ttls.get(key, 60))
 
 
 def _request_with_ip(ip: str) -> Request:

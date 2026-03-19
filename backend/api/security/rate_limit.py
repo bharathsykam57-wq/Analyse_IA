@@ -29,6 +29,40 @@ def _key(scope: str, identity: str, window_sec: int) -> str:
     return f"{RATE_LIMIT_PREFIX}:{scope}:{identity}:{window_sec}"
 
 
+def build_rate_limit_headers(limit: int, remaining: int, reset_sec: int) -> dict[str, str]:
+    return {
+        "X-RateLimit-Limit": str(max(limit, 0)),
+        "X-RateLimit-Remaining": str(max(remaining, 0)),
+        "X-RateLimit-Reset": str(max(reset_sec, 0)),
+    }
+
+
+def get_rate_limit_state(*, scope: str, identity: str, window_sec: int = DEFAULT_WINDOW_SEC) -> dict[str, int | str]:
+    """Inspect current fixed-window counter state for a scope/identity key."""
+    try:
+        r = redis.from_url(get_redis_url())
+        k = _key(scope, identity, window_sec)
+        current = r.get(k)
+        ttl = int(r.ttl(k))
+        count = int(current or 0)
+        if ttl < 0:
+            ttl = window_sec
+        return {
+            "key": k,
+            "count": count,
+            "ttl_sec": ttl,
+            "window_sec": window_sec,
+        }
+    except Exception as err:
+        logger.warning(f"Rate limit inspect unavailable for scope={scope}: {err}")
+        return {
+            "key": _key(scope, identity, window_sec),
+            "count": 0,
+            "ttl_sec": window_sec,
+            "window_sec": window_sec,
+        }
+
+
 def enforce_rate_limit(
     *,
     request: Request,
@@ -37,7 +71,7 @@ def enforce_rate_limit(
     limit: int,
     window_sec: int = DEFAULT_WINDOW_SEC,
     message: str = "Rate limit exceeded. Please retry later.",
-) -> None:
+) -> dict[str, str]:
     """Raise HTTP 429 when fixed-window counter exceeds limit.
 
     Best effort: if Redis is down, request is allowed.
@@ -52,16 +86,28 @@ def enforce_rate_limit(
         if count == 1:
             r.expire(k, window_sec)
 
+        ttl = int(r.ttl(k))
+        if ttl < 0:
+            ttl = window_sec
+
+        remaining = max(limit - count, 0)
+        headers = build_rate_limit_headers(limit=limit, remaining=remaining, reset_sec=ttl)
+
         if count > limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=message,
-                headers={"Retry-After": str(window_sec)},
+                headers={
+                    "Retry-After": str(ttl),
+                    **headers,
+                },
             )
+        return headers
     except HTTPException:
         raise
     except Exception as err:
         logger.warning(f"Rate limit backend unavailable for scope={scope}: {err}")
+        return {}
 
 
 def enforce_ip_rate_limit(
@@ -71,9 +117,9 @@ def enforce_ip_rate_limit(
     limit: int,
     window_sec: int = DEFAULT_WINDOW_SEC,
     message: str = "Too many requests from this IP. Please retry later.",
-) -> None:
+) -> dict[str, str]:
     ip = _client_ip(request)
-    enforce_rate_limit(
+    return enforce_rate_limit(
         request=request,
         scope=f"{scope}:ip",
         identity=ip,
@@ -91,8 +137,8 @@ def enforce_user_rate_limit(
     limit: int,
     window_sec: int = DEFAULT_WINDOW_SEC,
     message: str = "Too many requests for this account. Please retry later.",
-) -> None:
-    enforce_rate_limit(
+) -> dict[str, str]:
+    return enforce_rate_limit(
         request=request,
         scope=f"{scope}:user",
         identity=user_id,
