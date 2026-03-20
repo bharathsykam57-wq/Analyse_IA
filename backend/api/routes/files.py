@@ -264,7 +264,7 @@ async def upload_csv(
     )
 
     return {
-        "file_id": file_id,
+        "file_id": filename,  # full "{uuid}_{sanitized_name}" matches list_files and Supabase path
         "filename": filename,
         "original_name": file.filename,
         "size_bytes": len(contents),
@@ -409,7 +409,7 @@ async def upload_pdf(
     )
 
     return {
-        "file_id": file_id,
+        "file_id": filename,  # full "{uuid}_{sanitized_name}" matches list_files and Supabase path
         "filename": filename,
         "original_name": file.filename,
         "size_bytes": len(contents),

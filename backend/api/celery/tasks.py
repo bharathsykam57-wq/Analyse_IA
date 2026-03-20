@@ -89,6 +89,16 @@ from backend.utils.redis_config import get_redis_url
 
 logger = logging.getLogger(__name__)
 
+# Supabase client (used inside worker to download files from cloud storage)
+try:
+    from supabase import create_client as _supabase_create_client
+    _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    _SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+    _supabase = _supabase_create_client(_SUPABASE_URL, _SUPABASE_SERVICE_KEY) if _SUPABASE_URL and _SUPABASE_SERVICE_KEY else None
+except Exception as _supabase_init_err:
+    _supabase = None
+    logger.warning(f"Supabase client init failed in tasks.py: {_supabase_init_err}")
+
 # Redis Connection URL
 # ═══════════════════════════════════════════════════════════════════════════════
 # Used for:
@@ -457,7 +467,7 @@ class LoggedTask(Task):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @celery_app.task(bind=True, base=LoggedTask, name="backend.api.celery.tasks.run_agent")
-def run_agent(self, query: str, session_id: str, language: str = "fr", file_path: str = None):
+def run_agent(self, query: str, session_id: str, language: str = "fr", file_id: str = None, user_id: str = None):
     """Run master agent for multi-step data analysis and query resolution.
     
     Orchestrates Phase 3 MasterAgent. Handles complex queries requiring chaining
@@ -590,6 +600,33 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
             "message": "Agent activé..." if language == "fr" else "Agent activated...",
         })
 
+        # Download file from Supabase Storage (if file_id and user_id provided)
+        # The worker downloads to /tmp because it may be a separate Railway service
+        # from the API and cannot share the API's local filesystem.
+        _tmp_file: str | None = None
+        file_path: str | None = None
+
+        if file_id and user_id:
+            if _supabase is not None:
+                try:
+                    storage_path = f"{user_id}/{file_id}"
+                    file_bytes = _supabase.storage.from_("uploads").download(storage_path)
+                    tmp_path = os.path.join("/tmp", file_id)
+                    with open(tmp_path, "wb") as _f:
+                        _f.write(file_bytes)
+                    file_path = tmp_path
+                    _tmp_file = tmp_path
+                    logger.info(f"Worker downloaded {storage_path} from Supabase to {tmp_path}")
+                except Exception as _e:
+                    logger.warning(f"Worker Supabase download failed, trying local filesystem: {_e}")
+
+            # Fallback: local filesystem (dev / single-service deployments)
+            if file_path is None:
+                local_path = os.path.join("uploads", user_id, file_id)
+                if os.path.exists(local_path):
+                    file_path = local_path
+                    logger.info(f"Worker using local file: {file_path}")
+
         # Execute agent with query and optional file context
         dataset_path = file_path if file_path and file_path.lower().endswith(".csv") else None
         pdf_source = os.path.basename(file_path) if file_path and file_path.lower().endswith(".pdf") else None
@@ -600,6 +637,15 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_path
             dataset_path=dataset_path,
             pdf_source=pdf_source,
         )
+
+        # Clean up /tmp file after agent finishes
+        if _tmp_file is not None:
+            try:
+                if os.path.exists(_tmp_file):
+                    os.remove(_tmp_file)
+                    logger.debug(f"Worker cleaned up /tmp file: {_tmp_file}")
+            except Exception as _cleanup_err:
+                logger.warning(f"Worker failed to clean up /tmp file {_tmp_file}: {_cleanup_err}")
 
         # Notify client: Completed
         publish_progress(task_id, {
