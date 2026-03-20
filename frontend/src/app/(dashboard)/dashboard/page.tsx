@@ -57,7 +57,7 @@ export default function AgentChatPage() {
             addMessage({
               id: Date.now().toString(),
               role: 'assistant',
-              content: statusResult.answer || "L'analyse est terminée. Voici les résultats.",
+              content: statusResult.answer || statusResult.result?.answer || "L'analyse est terminée. Voici les résultats.",
               timestamp: new Date().toISOString(),
               analysisData: statusResult.result?.result || undefined
             });
@@ -84,11 +84,11 @@ export default function AgentChatPage() {
     return () => clearInterval(pollInterval);
   }, [isProcessing, currentTaskId, addMessage, setIsProcessing, removeLoading]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isProcessing) return;
+  const handleSend = async (e?: React.FormEvent, textOverride?: string) => {
+    e?.preventDefault();
+    const userPrompt = textOverride ?? input;
+    if (!userPrompt.trim() || isProcessing) return;
 
-    const userPrompt = input;
     setInput("");
 
     // 1. Add user message
@@ -202,7 +202,9 @@ export default function AgentChatPage() {
                      className="bg-black/60 border border-white/5 text-white rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none w-full shadow-inner appearance-none cursor-pointer"
                    >
                      {files.map(f => (
-                       <option key={f.file_id} value={f.file_id} className="bg-[#050A15] p-2">{f.filename}</option>
+                       <option key={f.file_id} value={f.file_id} className="bg-[#050A15] p-2">
+                         {f.filename.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '')}
+                       </option>
                      ))}
                    </select>
                  </div>
@@ -231,9 +233,9 @@ export default function AgentChatPage() {
                      "Affichez-moi un exemple de dashboard"
                   ]
                 ).map((suggestion, i) => (
-                 <button 
+                 <button
                   key={`suggestion-${files.length > 0 ? 'with-files' : 'no-files'}-${i}`}
-                  onClick={() => setInput(suggestion)}
+                  onClick={() => handleSend(undefined, suggestion)}
                   className="px-6 py-5 text-sm text-left bg-white/[0.03] backdrop-blur-md border border-white/5 hover:bg-white/5 hover:border-blue-500/30 rounded-2xl transition-all duration-300 text-gray-300 hover:text-white flex items-center gap-4 group shadow-xl shadow-black/20"
                   style={{ animationDelay: `${i * 100}ms` }}
                  >
@@ -306,7 +308,7 @@ export default function AgentChatPage() {
       <div className="sticky bottom-0 z-30 p-2 pt-4 pb-4 bg-gradient-to-t from-[#050A15] via-[#050A15]/95 to-transparent">
         <div className="max-w-3xl mx-auto flex flex-col items-center">
           <form 
-            onSubmit={handleSend}
+            onSubmit={(e) => handleSend(e)}
             className="flex items-center gap-2 bg-black/40 backdrop-blur-2xl border border-white/10 hover:border-white/20 rounded-full p-1.5 pl-6 shadow-2xl shadow-blue-900/10 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-300 w-full"
           >
             <Input

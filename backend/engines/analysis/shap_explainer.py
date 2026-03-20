@@ -26,7 +26,9 @@ import shap
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OrdinalEncoder
 from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
+from sklearn.linear_model import Ridge, Lasso, ElasticNet, LogisticRegression
 from sklearn.ensemble import (
     RandomForestRegressor, GradientBoostingRegressor, ExtraTreesRegressor,
     RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
@@ -35,7 +37,7 @@ from sklearn.ensemble import (
 logger = logging.getLogger(__name__)
 
 
-# Map PyCaret model names to sklearn classes
+# Map PyCaret and Optuna model names to sklearn classes
 REGRESSION_MODELS = {
     'Ridge': Ridge,
     'Lasso': Lasso,
@@ -43,12 +45,19 @@ REGRESSION_MODELS = {
     'RandomForestRegressor': RandomForestRegressor,
     'GradientBoostingRegressor': GradientBoostingRegressor,
     'ExtraTreesRegressor': ExtraTreesRegressor,
+    # Optuna-style names (backward compatible)
+    'random_forest': RandomForestRegressor,
 }
 
 CLASSIFICATION_MODELS = {
     'RandomForestClassifier': RandomForestClassifier,
     'GradientBoostingClassifier': GradientBoostingClassifier,
     'ExtraTreesClassifier': ExtraTreesClassifier,
+    # Optuna-style names (backward compatible)
+    'random_forest': RandomForestClassifier,
+    'lightgbm': LGBMClassifier,
+    'xgboost': XGBClassifier,
+    'logistic_regression': LogisticRegression,
 }
 
 

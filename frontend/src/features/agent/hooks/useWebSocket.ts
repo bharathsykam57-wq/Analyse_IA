@@ -49,10 +49,10 @@ export function useWebSocket(
 
   const getApiUrl = useCallback(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    // Convert http/https to ws/wss
+    // Convert https → wss, http → ws (preserves Railway TLS)
     return apiUrl
-      .replace(/^https?:\/\//, "ws://")
-      .replace(/^wss?:/, "ws:");
+      .replace(/^https:\/\//, "wss://")
+      .replace(/^http:\/\//, "ws://");
   }, []);
 
   const getAuthToken = useCallback(() => {

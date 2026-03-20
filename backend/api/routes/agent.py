@@ -202,25 +202,25 @@ async def ask_agent(
     file_path = None
     import os
     user_upload_dir = os.path.join("uploads", str(current_user.id))
-    
+
     logger.info(f"Looking for files in: {user_upload_dir} (user_id={current_user.id})")
-    
-    # First, try user's own directory
-    if os.path.exists(user_upload_dir):
-        logger.info(f"Upload directory exists, scanning for files...")
-        files_with_times = []
-        
-        for filename in os.listdir(user_upload_dir):
-            if filename.startswith('.'):
-                continue
-            full_path = os.path.join(user_upload_dir, filename)
-            
-            if request.file_id:
-                if filename.startswith(request.file_id):
-                    file_path = full_path
-                    logger.info(f"Found matching file for file_id: {file_path}")
-                    break
-            else:
+
+    # If file_id is provided, resolve directly to the real disk path: uploads/{user_id}/{file_id}
+    if request.file_id:
+        file_path = os.path.join("uploads", str(current_user.id), request.file_id)
+        logger.info(f"Resolved file_path for file_id={request.file_id}: {file_path}")
+        if not os.path.exists(file_path):
+            file_path = None
+
+    # Auto-select most recent CSV if no file_id provided
+    if not file_path and not request.file_id:
+        if os.path.exists(user_upload_dir):
+            logger.info(f"Upload directory exists, scanning for CSV files...")
+            files_with_times = []
+            for filename in os.listdir(user_upload_dir):
+                if filename.startswith('.'):
+                    continue
+                full_path = os.path.join(user_upload_dir, filename)
                 if filename.lower().endswith('.csv'):
                     try:
                         mtime = os.path.getmtime(full_path)
@@ -228,13 +228,12 @@ async def ask_agent(
                         logger.debug(f"Found CSV: {filename} (mtime={mtime})")
                     except OSError:
                         pass
-        
-        if not file_path and files_with_times and not request.file_id:
-            file_path = max(files_with_times, key=lambda x: x[1])[0]
-            logger.info(f"Auto-selected most recent CSV from user dir: {file_path}")
-    else:
-        logger.warning(f"User upload directory does not exist: {user_upload_dir}")
-    
+            if files_with_times:
+                file_path = max(files_with_times, key=lambda x: x[1])[0]
+                logger.info(f"Auto-selected most recent CSV from user dir: {file_path}")
+        else:
+            logger.warning(f"User upload directory does not exist: {user_upload_dir}")
+
     # Fallback: Search for most recent CSV across all upload directories
     if not file_path and not request.file_id:
         logger.info("Searching for most recent CSV across all user directories...")

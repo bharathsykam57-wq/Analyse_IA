@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { HistoryItem } from "@/shared/types/history";
 import { useChatStore } from "@/features/agent/store/chatStore";
+import { apiClient } from "@/shared/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/Card";
 import {
   History,
@@ -53,53 +54,30 @@ export default function HistoryPage() {
     const loadHistory = async () => {
       try {
         setIsLoading(true);
-        // Simulate API call with mock data
-        await new Promise((resolve) => setTimeout(resolve, 300));
 
-        const mockQueries: HistoryItem[] = [
-          {
-            id: "0",
-            query: "Lance l'AutoML sur titanic.csv",
-            result: "Random Forest Classifier entraîné avec succès. Précision de 89.4%. 12 outliers détectés et traités.",
-            timestamp: new Date().toISOString(),
-            status: "SUCCESS",
-            model_used: "Random Forest",
-            confidence: 0.894,
-          },
-          {
-            id: "1",
-            query: "Analyse des anomalies dans le dataset des ventes Q3",
-            result: "Detection de 45 anomalies (Random Forest). Précision 94%.",
-            timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-            status: "SUCCESS",
-            model_used: "Isolation Forest",
-            confidence: 0.94,
-          },
-          {
-            id: "2",
-            query: "Résumé du rapport financier annuel",
-            result: "Génération du résumé exécutif à partir de 4 sections clés.",
-            timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-            status: "SUCCESS",
-            model_used: "Claude",
-            confidence: 0.87,
-          },
-          {
-            id: "3",
-            query: "Prédiction de l'attrition client (Churn)",
-            result: "Le modèle n'a pas pu converger en raison de données manquantes.",
-            timestamp: new Date(Date.now() - 3600000 * 48).toISOString(),
-            status: "FAILURE",
-            model_used: "GPT-4",
-            confidence: 0,
-          },
-        ];
+        const offset = (page - 1) * pageSize;
+        const response = await apiClient.get('/agent/history', {
+          params: { limit: pageSize, offset },
+        });
+        const raw = response.data;
 
-        // Simple client-side filtering
-        let filtered = mockQueries;
+        // Map backend fields to HistoryItem shape
+        let items: HistoryItem[] = (raw.history || []).map(
+          (row: Record<string, unknown>) => ({
+            id: String(row.id ?? ''),
+            query: String(row.question ?? ''),
+            result: String(row.answer_preview ?? ''),
+            timestamp: String(row.created_at ?? new Date().toISOString()),
+            model_used: String(row.best_model ?? ''),
+            confidence: Number(row.confidence_score ?? 0),
+            status: row.answer_preview ? ('SUCCESS' as const) : ('FAILURE' as const),
+            task_type: String(row.task_type ?? 'analysis'),
+          })
+        );
 
+        // Client-side filtering
         if (searchQuery) {
-          filtered = filtered.filter(
+          items = items.filter(
             (item) =>
               item.query.toLowerCase().includes(searchQuery.toLowerCase()) ||
               item.result.toLowerCase().includes(searchQuery.toLowerCase())
@@ -107,16 +85,20 @@ export default function HistoryPage() {
         }
 
         if (statusFilter !== "all") {
-          filtered = filtered.filter((item) => item.status === statusFilter);
+          items = items.filter((item) => item.status === statusFilter);
         }
 
-        const total = filtered.length;
-        const start = (page - 1) * pageSize;
-        const paginated = filtered.slice(start, start + pageSize);
+        if (dateRange !== "all") {
+          const cutoffMs =
+            dateRange === "last_24h" ? Date.now() - 86_400_000 : Date.now() - 7 * 86_400_000;
+          items = items.filter(
+            (item) => new Date(item.timestamp).getTime() >= cutoffMs
+          );
+        }
 
         setData({
-          queries: paginated,
-          total_count: total,
+          queries: items,
+          total_count: raw.total ?? items.length,
           page,
           page_size: pageSize,
         });
