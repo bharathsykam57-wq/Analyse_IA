@@ -56,6 +56,16 @@ from backend.api.dependencies import get_db
 from backend.api.auth.router import get_current_active_user
 from backend.api.auth.models import User
 
+try:
+    from supabase import create_client
+    _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    _SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+    _supabase = create_client(_SUPABASE_URL, _SUPABASE_SERVICE_KEY) if _SUPABASE_URL and _SUPABASE_SERVICE_KEY else None
+except Exception as _supabase_init_err:
+    _supabase = None
+    import logging as _l
+    _l.getLogger(__name__).warning(f"Supabase client init failed in files.py: {_supabase_init_err}")
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -230,6 +240,19 @@ async def upload_csv(
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
 
+    # Also upload to Supabase Storage for persistent cloud storage
+    if _supabase is not None:
+        try:
+            storage_path = f"{current_user.id}/{filename}"
+            _supabase.storage.from_("uploads").upload(
+                storage_path,
+                contents,
+                {"content-type": file.content_type or "text/csv"},
+            )
+            logger.info(f"CSV uploaded to Supabase Storage: {storage_path}")
+        except Exception as _e:
+            logger.warning(f"Supabase CSV upload failed (file saved locally): {_e}")
+
     logger.info(f"CSV uploaded: {filename} ({len(contents)} bytes) by {current_user.email}")
     log_analytics_event_sync(
         event_type="file_upload",
@@ -362,6 +385,19 @@ async def upload_pdf(
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
 
+    # Also upload to Supabase Storage for persistent cloud storage
+    if _supabase is not None:
+        try:
+            storage_path = f"{current_user.id}/{filename}"
+            _supabase.storage.from_("uploads").upload(
+                storage_path,
+                contents,
+                {"content-type": "application/pdf"},
+            )
+            logger.info(f"PDF uploaded to Supabase Storage: {storage_path}")
+        except Exception as _e:
+            logger.warning(f"Supabase PDF upload failed (file saved locally): {_e}")
+
     logger.info(f"PDF uploaded: {filename} ({len(contents)} bytes) by {current_user.email}")
     log_analytics_event_sync(
         event_type="file_upload",
@@ -492,29 +528,51 @@ async def list_files(
                 "total": 0
             }
     """
-    # Build path to user's upload directory
-    user_dir = os.path.join(UPLOAD_DIR, str(current_user.id))
+    user_id_str = str(current_user.id)
 
-    # Early return if directory doesn't exist (user has never uploaded)
+    # Prefer Supabase Storage listing when client is available
+    if _supabase is not None:
+        try:
+            objects = _supabase.storage.from_("uploads").list(user_id_str)
+            files = []
+            for obj in (objects or []):
+                name = obj.get("name", "")
+                if not name:
+                    continue  # Skip folder placeholders
+                metadata = obj.get("metadata") or {}
+                ext = os.path.splitext(name)[1].lower()
+                files.append({
+                    "file_id": name,
+                    "filename": name,
+                    "type": "csv" if ext == ".csv" else "pdf",
+                    "size_bytes": int(metadata.get("size", 0)),
+                    "uploaded_at": (
+                        obj.get("updated_at")
+                        or obj.get("created_at")
+                        or datetime.now(timezone.utc).isoformat()
+                    ),
+                })
+            return {"files": files, "total": len(files)}
+        except Exception as _e:
+            logger.warning(f"Supabase list failed, falling back to filesystem: {_e}")
+
+    # Fallback: local filesystem listing
+    user_dir = os.path.join(UPLOAD_DIR, user_id_str)
     if not os.path.exists(user_dir):
         return {"files": [], "total": 0}
 
-    # Iterate directory and build metadata for each file
     files = []
     for filename in os.listdir(user_dir):
-        # Get filesystem metadata (size, modification time)
         filepath = os.path.join(user_dir, filename)
         stat = os.stat(filepath)
-        ext = os.path.splitext(filename)[1].lower()  # Extension for type detection
-        
-        # Build file metadata object
+        ext = os.path.splitext(filename)[1].lower()
         files.append({
-            "file_id": filename,  # Use filename as unique file identifier
+            "file_id": filename,
             "filename": filename,
-            "type": "csv" if ext == ".csv" else "pdf",  # Type detection from extension
+            "type": "csv" if ext == ".csv" else "pdf",
             "size_bytes": stat.st_size,
             "uploaded_at": datetime.fromtimestamp(
-                stat.st_mtime, tz=timezone.utc  # Filesystem modification time
+                stat.st_mtime, tz=timezone.utc
             ).isoformat(),
         })
 

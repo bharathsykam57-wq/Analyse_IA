@@ -25,8 +25,19 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import json
+import os
 import redis
 from celery.result import AsyncResult
+
+try:
+    from supabase import create_client as _supabase_create_client
+    _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    _SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+    _supabase = _supabase_create_client(_SUPABASE_URL, _SUPABASE_SERVICE_KEY) if _SUPABASE_URL and _SUPABASE_SERVICE_KEY else None
+except Exception as _supabase_init_err:
+    _supabase = None
+    import logging as _l
+    _l.getLogger(__name__).warning(f"Supabase client init failed in agent.py: {_supabase_init_err}")
 
 from backend.api.dependencies import get_db
 from backend.api.auth.router import get_current_active_user
@@ -200,17 +211,32 @@ async def ask_agent(
     )
 
     file_path = None
-    import os
     user_upload_dir = os.path.join("uploads", str(current_user.id))
+    _tmp_file_created: Optional[str] = None  # track /tmp path for cleanup
 
     logger.info(f"Looking for files in: {user_upload_dir} (user_id={current_user.id})")
 
-    # If file_id is provided, resolve directly to the real disk path: uploads/{user_id}/{file_id}
+    # If file_id is provided, download from Supabase Storage to /tmp
     if request.file_id:
-        file_path = os.path.join("uploads", str(current_user.id), request.file_id)
-        logger.info(f"Resolved file_path for file_id={request.file_id}: {file_path}")
-        if not os.path.exists(file_path):
-            file_path = None
+        if _supabase is not None:
+            try:
+                storage_path = f"{current_user.id}/{request.file_id}"
+                file_bytes = _supabase.storage.from_("uploads").download(storage_path)
+                tmp_path = os.path.join("/tmp", request.file_id)
+                with open(tmp_path, "wb") as _tmp_f:
+                    _tmp_f.write(file_bytes)
+                file_path = tmp_path
+                _tmp_file_created = tmp_path
+                logger.info(f"Downloaded {storage_path} from Supabase to {tmp_path}")
+            except Exception as _e:
+                logger.warning(f"Supabase download failed, trying local filesystem: {_e}")
+
+        # Fallback: local filesystem
+        if file_path is None:
+            local_path = os.path.join("uploads", str(current_user.id), request.file_id)
+            if os.path.exists(local_path):
+                file_path = local_path
+                logger.info(f"Using local file: {file_path}")
 
     # Auto-select most recent CSV if no file_id provided
     if not file_path and not request.file_id:
@@ -273,6 +299,15 @@ async def ask_agent(
         },
         queue="agent",
     )
+
+    # Clean up /tmp file now that the task has been dispatched
+    if _tmp_file_created is not None:
+        try:
+            if os.path.exists(_tmp_file_created):
+                os.remove(_tmp_file_created)
+                logger.debug(f"Cleaned up /tmp file: {_tmp_file_created}")
+        except Exception as _cleanup_err:
+            logger.warning(f"Failed to clean up /tmp file {_tmp_file_created}: {_cleanup_err}")
 
     _record_user_task(str(current_user.id), task.id)
     log_analytics_event_sync(
