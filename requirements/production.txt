@@ -51,7 +51,7 @@ langfuse==2.36.2
 
 # Utils
 python-dotenv==1.2.2
-httpx==0.28.1
+httpx>=0.24.0,<1.0
 aiofiles==24.1.0
 websockets==14.1
-supabase==2.3.0
+supabase==2.10.0
