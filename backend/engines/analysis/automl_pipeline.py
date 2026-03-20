@@ -294,5 +294,29 @@ def _run_demo() -> None:
     print(shap_df.head(10).to_string(index=False))
 
 
+def run_automl(X: pd.DataFrame, y: pd.Series | np.ndarray, n_trials: int = 30) -> dict:
+    """
+    Industry-standard wrapper that encapsulates the full AutoML flow.
+    Ensures the Celery worker has a single, stable entry point.
+    """
+    config = AutoMLConfig(n_trials=n_trials)
+    
+    # 1. Optimize hyperparameters
+    study = optuna.create_study(direction="maximize")
+    study.optimize(lambda t: objective(t, X, y, config=config), n_trials=config.n_trials)
+    
+    # 2. Train the production-ready model
+    best_pipeline = train_best_model(X, y, best_params=study.best_params)
+    
+    # 3. Generate XAI (Explainable AI) metrics
+    shap_df = generate_shap_explanation(best_pipeline, X)
+    
+    return {
+        "best_params": study.best_params,
+        "best_score": study.best_value,
+        "feature_importance": shap_df.to_dict(orient="records"),
+        "model": best_pipeline
+    }
+
 if __name__ == "__main__":
     _run_demo()
