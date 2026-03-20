@@ -1,72 +1,37 @@
-from celery import Celery
-from dotenv import load_dotenv
+import logging
 import os
-import ssl
-from backend.utils.redis_config import get_redis_url
+from celery import Celery
+from backend.utils.redis_config import get_redis_url  # Import your utility logic
 
-load_dotenv()
+# Initialize logger so it is defined for the manual fix below
+logger = logging.getLogger(__name__)
 
-REDIS_URL = get_redis_url()
-
-# SSL Configuration for Upstash Redis (rediss://)
-# Default is secure certificate validation; set REDIS_SSL_INSECURE=true only for emergency fallback.
-USE_REDIS_SSL = REDIS_URL.startswith("rediss://")
-REDIS_SSL_INSECURE = os.getenv("REDIS_SSL_INSECURE", "false").lower() == "true"
-
-if USE_REDIS_SSL:
-    if REDIS_SSL_INSECURE:
-        ssl_config = {
-            "ssl_cert_reqs": ssl.CERT_NONE,
-            "ssl_check_hostname": False,
-        }
-    else:
-        ssl_config = {
-            "ssl_cert_reqs": ssl.CERT_REQUIRED,
-            "ssl_check_hostname": True,
-        }
-else:
-    ssl_config = {}
+# --- MANUAL FIX: Use the normalized URL for Upstash compatibility ---
+celery_url = get_redis_url()
 
 celery_app = Celery(
-    "analyse_ia",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-    include=["backend.api.celery.tasks"],
+    "tasks",
+    broker=celery_url,
+    backend=celery_url,
+    include=["backend.api.celery.tasks"]
 )
+
+# --- MANUAL FIX: Apply SSL/TLS settings for Cloud Redis (Upstash) ---
+if celery_url.startswith("rediss://"):
+    logger.info("Enabling SSL for Celery/Redis connection.")
+    ssl_conf = {'ssl_cert_reqs': None}
+    celery_app.conf.update(
+        broker_use_ssl=ssl_conf,
+        redis_backend_use_ssl=ssl_conf,
+    )
 
 celery_app.conf.update(
-    # SSL for Upstash Redis
-    broker_use_ssl=ssl_config,
-    redis_backend_use_ssl=ssl_config,
-
-    # Broker connection retry (fixes Celery 6.0 deprecation warning)
-    broker_connection_retry_on_startup=True,
-
-    # Serialization
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-
-    # Timezone
-    timezone="Europe/Paris",
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json',
+    timezone='UTC',
     enable_utc=True,
-
-    # Task Execution
-    task_track_started=True,
-    task_acks_late=True,
-    worker_prefetch_multiplier=1,
-
-    # Result Storage
-    result_expires=3600,
-
-    # Retry
-    task_max_retries=3,
-    task_default_retry_delay=5,
-
-    # Task Routing
-    task_routes={
-        "backend.api.celery.tasks.run_analysis": {"queue": "analysis"},
-        "backend.api.celery.tasks.run_rag": {"queue": "rag"},
-        "backend.api.celery.tasks.run_agent": {"queue": "agent"},
-    },
 )
+
+if __name__ == "__main__":
+    celery_app.start()
