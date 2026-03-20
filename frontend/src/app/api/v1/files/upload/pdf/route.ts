@@ -19,7 +19,7 @@ export async function POST(req: Request) {
       type: file.type,
       uploaded_at: new Date().toISOString()
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ detail: "Internal Server Error" }, { status: 500 });
   }
 }

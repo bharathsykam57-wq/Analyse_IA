@@ -87,7 +87,7 @@ export function ConfirmationModal({
               className="w-full"
             />
             {emailInput && emailInput !== requireEmail && (
-              <p className="text-xs text-red-500">L'email ne correspond pas</p>
+              <p className="text-xs text-red-500">L&apos;email ne correspond pas</p>
             )}
           </div>
         )}

@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Metadata } from "next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/components/ui/Card";
 import { Button } from "@/shared/components/ui/Button";
-import { Input } from "@/shared/components/ui/Input";
 import {
   User,
   Key,
@@ -175,7 +173,7 @@ export default function AccountPage() {
                 </div>
 
                 <div>
-                  <p className="text-sm text-gray-500 mb-1">Plan d'Abonnement</p>
+                  <p className="text-sm text-gray-500 mb-1">Plan d&apos;Abonnement</p>
                   <div className="flex items-center gap-2">
                     <span className="text-white font-medium capitalize">
                       {account.subscription_plan === "free"
@@ -222,7 +220,7 @@ export default function AccountPage() {
               <div className="pt-4 border-t border-white/5">
                 <Button className="gap-2 bg-blue-600 hover:bg-blue-700">
                   <CreditCard className="w-4 h-4" />
-                  Gérer l'Abonnement
+                  Gérer l&apos;Abonnement
                 </Button>
               </div>
             </>
@@ -239,7 +237,7 @@ export default function AccountPage() {
               Clés API
             </CardTitle>
             <CardDescription className="mt-1">
-              Gérez vos clés API pour l'intégration avec d'autres services
+              Gérez vos clés API pour l&apos;intégration avec d&apos;autres services
             </CardDescription>
           </div>
           <Button
@@ -385,7 +383,7 @@ export default function AccountPage() {
             </motion.div>
           ) : (
             <div className="text-center py-8 text-gray-500">
-              Aucune clé API créée. Cliquez sur "Créer une Clé" pour commencer.
+              Aucune clé API créée. Cliquez sur &quot;Créer une Clé&quot; pour commencer.
             </div>
           )}
         </CardContent>

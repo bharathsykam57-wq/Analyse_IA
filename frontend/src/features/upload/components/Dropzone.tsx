@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { UploadCloud, FileType, FileText, AlertCircle, Loader2 } from "lucide-react";
+import { FileType, FileText, AlertCircle, Loader2 } from "lucide-react";
 import { cn } from "@/shared/lib/utils";
 
 interface DropzoneProps {
@@ -16,6 +16,30 @@ interface DropzoneProps {
 export function Dropzone({ accept, maxSizeMB, type, onFileSelect, isUploading, progress }: DropzoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const processFiles = useCallback((files: File[]) => {
+    if (files.length === 0) return;
+    const file = files[0];
+
+    const isPDF = file.name.toLowerCase().endsWith('.pdf');
+    const isCSV = file.name.toLowerCase().endsWith('.csv');
+
+    if (type === 'pdf' && !isPDF) {
+      setError("Veuillez déposer un fichier PDF.");
+      return;
+    }
+    if (type === 'csv' && !isCSV) {
+      setError("Veuillez déposer un fichier CSV.");
+      return;
+    }
+
+    if (file.size > maxSizeMB * 1024 * 1024) {
+      setError(`La taille du fichier dépasse la limite de ${maxSizeMB}MB.`);
+      return;
+    }
+
+    onFileSelect(file, type);
+  }, [maxSizeMB, onFileSelect, type]);
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -39,39 +63,13 @@ export function Dropzone({ accept, maxSizeMB, type, onFileSelect, isUploading, p
 
     const files = Array.from(e.dataTransfer.files);
     processFiles(files);
-  }, [isUploading]);
+  }, [isUploading, processFiles]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
     if (e.target.files?.length) {
       processFiles(Array.from(e.target.files));
     }
-  };
-
-  const processFiles = (files: File[]) => {
-    if (files.length === 0) return;
-    const file = files[0];
-    
-    // Validate Extension
-    const isPDF = file.name.toLowerCase().endsWith('.pdf');
-    const isCSV = file.name.toLowerCase().endsWith('.csv');
-    
-    if (type === 'pdf' && !isPDF) {
-      setError("Veuillez déposer un fichier PDF.");
-      return;
-    }
-    if (type === 'csv' && !isCSV) {
-      setError("Veuillez déposer un fichier CSV.");
-      return;
-    }
-
-    // Validate Size
-    if (file.size > maxSizeMB * 1024 * 1024) {
-      setError(`La taille du fichier dépasse la limite de ${maxSizeMB}MB.`);
-      return;
-    }
-
-    onFileSelect(file, type);
   };
 
   const isPDF = type === 'pdf';

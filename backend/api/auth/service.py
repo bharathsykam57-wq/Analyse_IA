@@ -79,7 +79,8 @@ import os
 import logging
 import secrets
 
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 from passlib.context import CryptContext
 
 from backend.api.auth.models import User, RefreshToken
@@ -107,7 +108,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Configuration loaded from environment variables (.env or system vars)
 # Critical for security: JWT_SECRET_KEY must be strong (32+ chars) and not exposed
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not JWT_SECRET_KEY:
     logger.error(
         "JWT_SECRET_KEY not configured. Set JWT_SECRET_KEY environment variable. "
@@ -117,6 +118,12 @@ if not JWT_SECRET_KEY:
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+
+def _require_jwt_secret() -> str:
+    if not JWT_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY is required for token operations")
+    return JWT_SECRET_KEY
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -277,7 +284,7 @@ def create_access_token(user_id: UUID, email: str) -> tuple[str, int]:
         "exp": int(expire.timestamp()),  # Convert datetime to Unix timestamp (int)
         "type": "access",
     }
-    token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    token = jwt.encode(payload, _require_jwt_secret(), algorithm=JWT_ALGORITHM)
     return token, expires_in
 
 
@@ -371,7 +378,7 @@ def decode_access_token(token: str) -> dict:
     - Signature: Computed with JWT_SECRET_KEY (verifies origin from server)
     - Expiration (exp claim): Automatically checked by jwt.decode()
     - Algorithm (alg): Header field verified against allowed algorithms
-    - If any check fails: Raises JWTError with specific reason
+    - If any check fails: Raises InvalidTokenError with specific reason
     
     Args:
         token (str): JWT access token string from Authorization header
@@ -387,10 +394,10 @@ def decode_access_token(token: str) -> dict:
             }
     
     Raises:
-        JWTError: If token invalid, expired, tampered, or wrong type
-            - ExpiredSignatureError (subclass of JWTError): Token expired
+        InvalidTokenError: If token invalid, expired, tampered, or wrong type
+            - ExpiredSignatureError (subclass of InvalidTokenError): Token expired
             - DecodeError: Malformed token or invalid signature
-            - JWTError: Invalid token type (not "access")
+            - InvalidTokenError: Invalid token type (not "access")
     
     Error Handling:
         All errors are logged at WARNING level (not EXCEPTION level)
@@ -401,7 +408,7 @@ def decode_access_token(token: str) -> dict:
             payload = decode_access_token(authorization_header_token)
             user_id = payload["sub"]
             # Use user_id to fetch user from database
-        except JWTError as e:
+        except InvalidTokenError as e:
             # Return 401 Unauthorized to client
             raise HTTPException(status_code=401, detail="Invalid token")
     
@@ -416,16 +423,16 @@ def decode_access_token(token: str) -> dict:
         user = db.query(User).filter(User.id == user_id).first()
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, _require_jwt_secret(), algorithms=[JWT_ALGORITHM])
         
         # Verify token type (access vs refresh_token)
         if payload.get("type") != "access":
             logger.warning("JWT token type mismatch: expected 'access'")
-            raise JWTError("Invalid token type")
+            raise InvalidTokenError("Invalid token type")
         
         return payload
         
-    except JWTError as e:
+    except InvalidTokenError as e:
         # Log warning (not exception) to prevent leaking JWT details in production logs
         logger.warning(f"JWT decode failed: {e}")
         raise

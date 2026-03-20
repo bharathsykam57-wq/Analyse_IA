@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       access_token: "mock_access_token_123",
       refresh_token: "mock_refresh_token_456"
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ detail: "Internal Server Error" }, { status: 500 });
   }
 }

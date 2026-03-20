@@ -41,9 +41,16 @@ export default function LoginPage() {
       );
       
       router.push("/dashboard");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorDetail =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        typeof (error as { response?: { data?: { detail?: string } } }).response?.data?.detail === "string"
+          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
       setServerError(
-        error.response?.data?.detail || "Une erreur est survenue lors de la connexion."
+        errorDetail || "Une erreur est survenue lors de la connexion."
       );
     }
   };

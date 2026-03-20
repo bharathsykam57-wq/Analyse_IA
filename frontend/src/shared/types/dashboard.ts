@@ -80,7 +80,7 @@ export interface ExportOption {
 export interface ExportRequest {
   optionId: string;
   format: "csv" | "json" | "excel";
-  filters?: Record<string, any>;
+  filters?: Record<string, unknown>;
 }
 
 export interface ExportStats {
@@ -149,7 +149,7 @@ export interface PaginatedResponse<T> {
 export interface ApiError {
   code: string;
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   statusCode: number;
 }
 
@@ -203,5 +203,5 @@ export interface AuditLog {
   resource: string;
   timestamp: string;
   user_id: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }

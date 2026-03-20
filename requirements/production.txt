@@ -36,6 +36,9 @@ optuna==4.5.0
 shap==0.44.1
 lightgbm==4.6.0
 xgboost==2.1.4
+sentence-transformers==3.4.1
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.8.0
 pyod==2.0.7
 plotly==6.6.0
 

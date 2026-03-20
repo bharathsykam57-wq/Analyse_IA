@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { HistoryItem } from "@/shared/types/history";
 import { useChatStore } from "@/features/agent/store/chatStore";
-import { apiClient } from "@/shared/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/Card";
 import {
   History,
@@ -14,7 +13,6 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  Loader2,
   Filter,
   ChevronLeft,
   ChevronRight,
@@ -32,13 +30,16 @@ interface HistoryResponse {
   page_size: number;
 }
 
+type DateRangeFilter = "last_24h" | "last_7d" | "all";
+type StatusFilter = "all" | "SUCCESS" | "FAILURE";
+
 export default function HistoryPage() {
   const router = useRouter();
   const { addMessage, setIsProcessing } = useChatStore();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateRange, setDateRange] = useState<"last_24h" | "last_7d" | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "SUCCESS" | "FAILURE">("all");
+  const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const pageSize = 10;
   
@@ -159,10 +160,10 @@ export default function HistoryPage() {
       <div>
         <h1 className="text-3xl font-bold font-sans text-white mb-2 tracking-tight flex items-center gap-3">
           <History className="w-8 h-8 text-blue-500" />
-          Historique d'Analyse
+          Historique d&apos;Analyse
         </h1>
         <p className="text-blue-300/60 leading-relaxed">
-          Consultez et relancez vos requêtes d'analyse précédentes
+          Consultez et relancez vos requêtes d&apos;analyse précédentes
         </p>
       </div>
 
@@ -204,7 +205,7 @@ export default function HistoryPage() {
               <select
                 value={dateRange}
                 onChange={(e) => {
-                  setDateRange(e.target.value as any);
+                  setDateRange(e.target.value as DateRangeFilter);
                   setPage(1);
                 }}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm"
@@ -223,7 +224,7 @@ export default function HistoryPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => {
-                  setStatusFilter(e.target.value as any);
+                  setStatusFilter(e.target.value as StatusFilter);
                   setPage(1);
                 }}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm"
@@ -258,7 +259,7 @@ export default function HistoryPage() {
           <CardContent className="pt-6 flex items-center gap-4 justify-between">
             <div className="flex items-center gap-3">
               <AlertCircle className="w-5 h-5 text-red-500" />
-              <p className="text-red-400">Erreur lors du chargement de l'historique</p>
+              <p className="text-red-400">Erreur lors du chargement de l&apos;historique</p>
             </div>
             <Button
               variant="outline"
@@ -280,7 +281,7 @@ export default function HistoryPage() {
             <History className="w-12 h-12 text-gray-600 mb-4" />
             <p className="text-gray-400 mb-2">Aucune requête trouvée</p>
             <p className="text-gray-500 text-sm">
-              Vos requêtes d'analyse apparaîtront ici une fois exécutées
+              Vos requêtes d&apos;analyse apparaîtront ici une fois exécutées
             </p>
           </CardContent>
         </Card>

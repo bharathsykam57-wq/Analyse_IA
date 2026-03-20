@@ -26,6 +26,14 @@ interface ExportOption {
   dataSize?: string;
 }
 
+interface ExportStats {
+  total_queries: number;
+  total_models: number;
+  total_results: number;
+  last_export: string;
+  storage_used: string;
+}
+
 const exportOptions: ExportOption[] = [
   {
     id: "history",
@@ -62,19 +70,16 @@ const exportOptions: ExportOption[] = [
 ];
 
 export default function ExportsPage() {
-  const [selectedFormat, setSelectedFormat] = useState<Record<string, string>>({});
   const [exportedItems, setExportedItems] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState<Set<string>>(new Set());
   
   // Client-side state for export stats
-  const [stats, setStats] = useState<any | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
+  const [stats, setStats] = useState<ExportStats | null>(null);
 
   // Load export stats on mount
   useEffect(() => {
     const loadStats = async () => {
       try {
-        setStatsLoading(true);
         await new Promise((resolve) => setTimeout(resolve, 300));
         setStats({
           total_queries: 42,
@@ -85,8 +90,6 @@ export default function ExportsPage() {
         });
       } catch (error) {
         console.error("Failed to load export stats:", error);
-      } finally {
-        setStatsLoading(false);
       }
     };
 
@@ -290,11 +293,11 @@ export default function ExportsPage() {
         <CardContent className="space-y-3 text-sm text-gray-400">
           <div>
             <p className="font-medium text-gray-300 mb-1">Format CSV</p>
-            <p>Idéal pour les analyses dans Excel ou d'autres outils tableur. Données tabulaires.</p>
+            <p>Idéal pour les analyses dans Excel ou d&apos;autres outils tableur. Données tabulaires.</p>
           </div>
           <div>
             <p className="font-medium text-gray-300 mb-1">Format JSON</p>
-            <p>Format structuré avec métadonnées complètes. Meilleur pour l'intégration avec d'autres systèmes.</p>
+            <p>Format structuré avec métadonnées complètes. Meilleur pour l&apos;intégration avec d&apos;autres systèmes.</p>
           </div>
           <div>
             <p className="font-medium text-gray-300 mb-1">Format Excel</p>

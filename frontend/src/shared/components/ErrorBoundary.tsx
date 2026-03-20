@@ -49,11 +49,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             </div>
 
             <h1 className="text-2xl font-bold text-white mb-2">
-              Quelque chose s'est mal passé
+              Quelque chose s&apos;est mal passé
             </h1>
 
             <p className="text-gray-400 text-sm mb-6">
-              Une erreur inattendue s'est produite. Veuillez essayer de rafraîchir la page ou
+              Une erreur inattendue s&apos;est produite. Veuillez essayer de rafraîchir la page ou
               contacter le support.
             </p>
 

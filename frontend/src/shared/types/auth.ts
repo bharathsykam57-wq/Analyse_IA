@@ -9,7 +9,7 @@ export interface AuthTokens {
   refresh_token: string;
 }
 
-export interface LoginResponse extends AuthTokens {}
+export type LoginResponse = AuthTokens;
 
 export interface RequestError {
   detail: string;

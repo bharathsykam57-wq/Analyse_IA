@@ -11,7 +11,6 @@ import {
   Users, 
   Zap, 
   Globe, 
-  Check,
   Save,
   ChevronRight,
   Database
@@ -106,7 +105,7 @@ export default function SettingsPage() {
                       <div className="w-1.5 h-6 bg-blue-500 rounded-full" />
                       Profil Utilisateur
                     </CardTitle>
-                    <CardDescription>Vos informations publiques au sein de l'organisation.</CardDescription>
+                    <CardDescription>Vos informations publiques au sein de l&apos;organisation.</CardDescription>
                   </CardHeader>
                   <CardContent className="p-8 pt-10 space-y-8">
                     <div className="flex items-center gap-8">
@@ -176,7 +175,7 @@ export default function SettingsPage() {
                       </h5>
                       <div className="space-y-4">
                         {[
-                          "Alertes de fin d'analyse par email",
+                          "Alertes de fin d&apos;analyse par email",
                           "Notifications bureau temps réel",
                           "Rapports hebdomadaires automatiques"
                         ].map((label, i) => (
@@ -197,7 +196,7 @@ export default function SettingsPage() {
                       </h5>
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-gray-500 uppercase">Langue d'interface</label>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase">Langue d&apos;interface</label>
                           <select className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none">
                             <option>Français (FR)</option>
                             <option>English (US)</option>

@@ -66,7 +66,7 @@ from backend.api.auth.service import (
     logout_user,
     get_current_user,
 )
-from jose import JWTError
+from jwt import InvalidTokenError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 import logging
@@ -288,7 +288,7 @@ def get_current_active_user(
     """
     try:
         return get_current_user(token, db)
-    except (ValueError, JWTError):
+    except (ValueError, InvalidTokenError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalide ou expiré",

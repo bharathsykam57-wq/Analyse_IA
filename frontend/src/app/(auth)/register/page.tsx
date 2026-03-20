@@ -37,9 +37,16 @@ export default function RegisterPage() {
       // Spec requires a slight delay before shifting to the login flow after registration
       await new Promise(resolve => setTimeout(resolve, 800));
       router.push("/login");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorDetail =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        typeof (error as { response?: { data?: { detail?: string } } }).response?.data?.detail === "string"
+          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
       setServerError(
-        error.response?.data?.detail || "Une erreur est survenue lors de l'inscription."
+        errorDetail || "Une erreur est survenue lors de l'inscription."
       );
     }
   };

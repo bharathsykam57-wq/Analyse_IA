@@ -319,7 +319,7 @@ export default function DocumentationPage() {
                 <HelpCircle className="w-12 h-12 text-gray-600 mb-4" />
                 <p className="text-gray-400 mb-2">Aucune question trouvée</p>
                 <p className="text-gray-500 text-sm">
-                  Essayez avec d'autres mots-clés
+                  Essayez avec d&apos;autres mots-clés
                 </p>
               </CardContent>
             </Card>
@@ -383,7 +383,7 @@ export default function DocumentationPage() {
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
             <HelpCircle className="w-5 h-5 text-blue-400" />
-            Besoin d'Aide Supplémentaire?
+            Besoin d&apos;Aide Supplémentaire?
           </CardTitle>
           <CardDescription className="text-gray-400">
             Contactez notre équipe de support pour des questions non résolues

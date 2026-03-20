@@ -46,7 +46,11 @@ export default function UploadPage() {
 
     try {
       const newFile = await uploadFile(file, type, (progress) => {
-        isCsv ? setCsvProgress(progress) : setPdfProgress(progress);
+        if (isCsv) {
+          setCsvProgress(progress);
+        } else {
+          setPdfProgress(progress);
+        }
       });
       // Append the new file locally since the mock backend list is static
       setFiles(prev => [newFile, ...prev]);

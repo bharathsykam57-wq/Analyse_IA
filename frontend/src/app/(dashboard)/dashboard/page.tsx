@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 
 export default function AgentChatPage() {
   const router = useRouter();
-  const { messages, addMessage, updateMessage, isProcessing, setIsProcessing, currentTaskId, removeLoading, clearMessages } = useChatStore();
+  const { messages, addMessage, isProcessing, setIsProcessing, currentTaskId, removeLoading, clearMessages } = useChatStore();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -73,8 +73,8 @@ export default function AgentChatPage() {
              });
           }
           // If PENDING, loop continues
-        } catch (error) {
-          console.error("Polling error:", error);
+        } catch (pollingError) {
+          console.error("Polling error:", pollingError);
           clearInterval(pollInterval);
           setIsProcessing(false);
         }
@@ -82,7 +82,7 @@ export default function AgentChatPage() {
     }
 
     return () => clearInterval(pollInterval);
-  }, [isProcessing, currentTaskId, addMessage, setIsProcessing]);
+  }, [isProcessing, currentTaskId, addMessage, setIsProcessing, removeLoading]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,7 +118,7 @@ export default function AgentChatPage() {
       // 4. Update store to begin polling that specific task id
       setIsProcessing(true, response.task_id);
 
-    } catch (error) {
+    } catch {
       setIsProcessing(false);
       removeLoading();
       addMessage({
@@ -208,7 +208,7 @@ export default function AgentChatPage() {
                  </div>
               ) : (
                  <div className="max-w-md mx-auto bg-blue-500/10 border border-blue-500/20 rounded-xl p-6 flex flex-col items-center gap-4">
-                   <p className="text-blue-200 text-sm">Vous n'avez pas encore de données à analyser.</p>
+                   <p className="text-blue-200 text-sm">Vous n&apos;avez pas encore de données à analyser.</p>
                    <Button onClick={() => router.push('/upload')} className="bg-blue-600 hover:bg-blue-500 text-white w-full">
                      Téléverser un fichier
                    </Button>

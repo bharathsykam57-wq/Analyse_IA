@@ -38,7 +38,9 @@ export const changePassword = async (data: ChangePasswordRequest): Promise<{ suc
  * @param preferences - Preference settings
  * @returns Updated preferences
  */
-export const updatePreferences = async (preferences: any): Promise<any> => {
+export const updatePreferences = async (
+  preferences: Record<string, unknown>
+): Promise<Record<string, unknown>> => {
   const response = await apiClient.post("auth/preferences", preferences);
-  return response.data;
+  return response.data as Record<string, unknown>;
 };

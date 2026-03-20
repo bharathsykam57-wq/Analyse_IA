@@ -32,23 +32,23 @@ Usage:
 
 import logging
 import os
-from typing import Optional
 import psycopg2
-from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# PostgreSQL connection configuration (from environment or defaults)
-DB_CONFIG = {
-    "dbname": os.getenv("DB_NAME", "analyseIA_dev"),          # Database name
-    "user": os.getenv("DB_USER", "sykambharath"),              # Database user
-    "password": os.getenv("DB_PASSWORD", ""),                  # Authentication
-    "host": os.getenv("DB_HOST", "localhost"),                 # Server address
-    "port": os.getenv("DB_PORT", "5432"),                      # Port (pgvector default)
-}
+
+def _database_url() -> str:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable is required")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    if database_url.startswith("postgresql+psycopg2://"):
+        database_url = database_url.replace("postgresql+psycopg2://", "postgresql://", 1)
+    return database_url
 
 
 def get_connection():
@@ -77,9 +77,12 @@ def get_connection():
         ...     cursor.execute("SELECT COUNT(*) FROM documents")
     """
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        logger.debug(f"✓ Database connection established to {DB_CONFIG['host']}:{DB_CONFIG['port']}")
+        conn = psycopg2.connect(_database_url())
+        logger.debug("✓ Database connection established")
         return conn
+    except ValueError as e:
+        logger.error(f"✗ Database connection configuration error: {str(e)}")
+        return None
     except psycopg2.OperationalError as e:
         logger.error(f"✗ Database connection failed: {str(e)}")
         return None

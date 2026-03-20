@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       email: body.email,
       full_name: body.full_name
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ detail: "Internal Server Error" }, { status: 500 });
   }
 }
