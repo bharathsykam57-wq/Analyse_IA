@@ -1,13 +1,22 @@
 import logging
 import os
 from celery import Celery
-from backend.utils.redis_config import get_redis_url  # Import your utility logic
+from backend.utils.redis_config import get_redis_url
 
-# Initialize logger so it is defined for the manual fix below
 logger = logging.getLogger(__name__)
 
-# --- MANUAL FIX: Use the normalized URL for Upstash compatibility ---
-celery_url = get_redis_url()
+# 1. Get the base URL (e.g., rediss://default:pass@host:port/0)
+raw_url = get_redis_url()
+
+# 2. FIX: Celery 5.4+ requires ssl_cert_reqs to be PART of the URL string for rediss://
+# We append it as a query parameter.
+if raw_url.startswith("rediss://"):
+    logger.info("Enabling SSL and appending required cert parameters to URL.")
+    # If the URL already has parameters, use &, otherwise use ?
+    separator = "&" if "?" in raw_url else "?"
+    celery_url = f"{raw_url}{separator}ssl_cert_reqs=none"
+else:
+    celery_url = raw_url
 
 celery_app = Celery(
     "tasks",
@@ -16,9 +25,8 @@ celery_app = Celery(
     include=["backend.api.celery.tasks"]
 )
 
-# --- MANUAL FIX: Apply SSL/TLS settings for Cloud Redis (Upstash) ---
+# 3. Maintain the extra SSL config block for backward compatibility/extra safety
 if celery_url.startswith("rediss://"):
-    logger.info("Enabling SSL for Celery/Redis connection.")
     ssl_conf = {'ssl_cert_reqs': None}
     celery_app.conf.update(
         broker_use_ssl=ssl_conf,
