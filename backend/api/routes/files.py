@@ -244,14 +244,15 @@ async def upload_csv(
     if _supabase is not None:
         try:
             storage_path = f"{current_user.id}/{filename}"
+            logger.info(f"Attempting Supabase upload to: {storage_path}")
             _supabase.storage.from_("uploads").upload(
                 storage_path,
                 contents,
                 {"content-type": file.content_type or "text/csv"},
             )
-            logger.info(f"CSV uploaded to Supabase Storage: {storage_path}")
+            logger.info(f"Supabase upload successful: {storage_path}")
         except Exception as _e:
-            logger.warning(f"Supabase CSV upload failed (file saved locally): {_e}")
+            logger.warning(f"Supabase upload failed: {_e}", exc_info=True)
 
     logger.info(f"CSV uploaded: {filename} ({len(contents)} bytes) by {current_user.email}")
     log_analytics_event_sync(
@@ -389,14 +390,15 @@ async def upload_pdf(
     if _supabase is not None:
         try:
             storage_path = f"{current_user.id}/{filename}"
+            logger.info(f"Attempting Supabase upload to: {storage_path}")
             _supabase.storage.from_("uploads").upload(
                 storage_path,
                 contents,
                 {"content-type": "application/pdf"},
             )
-            logger.info(f"PDF uploaded to Supabase Storage: {storage_path}")
+            logger.info(f"Supabase upload successful: {storage_path}")
         except Exception as _e:
-            logger.warning(f"Supabase PDF upload failed (file saved locally): {_e}")
+            logger.warning(f"Supabase upload failed: {_e}", exc_info=True)
 
     logger.info(f"PDF uploaded: {filename} ({len(contents)} bytes) by {current_user.email}")
     log_analytics_event_sync(

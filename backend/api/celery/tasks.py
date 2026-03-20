@@ -580,6 +580,7 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_id: 
         - WebSocket: /ws/task/{task_id} (progress streaming)
     """
     task_id = self.request.id
+    logger.info(f"run_agent received: task_id={task_id} file_id={file_id!r} user_id={user_id!r} language={language}")
 
     try:
         # Notify client: Task started
@@ -610,15 +611,18 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_id: 
             if _supabase is not None:
                 try:
                     storage_path = f"{user_id}/{file_id}"
+                    logger.info(f"Worker attempting Supabase download: {storage_path}")
                     file_bytes = _supabase.storage.from_("uploads").download(storage_path)
                     tmp_path = os.path.join("/tmp", file_id)
                     with open(tmp_path, "wb") as _f:
                         _f.write(file_bytes)
                     file_path = tmp_path
                     _tmp_file = tmp_path
-                    logger.info(f"Worker downloaded {storage_path} from Supabase to {tmp_path}")
+                    logger.info(f"Worker Supabase download successful: {storage_path} → {tmp_path} ({len(file_bytes)} bytes)")
                 except Exception as _e:
-                    logger.warning(f"Worker Supabase download failed, trying local filesystem: {_e}")
+                    logger.warning(f"Worker Supabase download failed, trying local filesystem: {_e}", exc_info=True)
+            else:
+                logger.warning("Worker: _supabase client is None, skipping Supabase download")
 
             # Fallback: local filesystem (dev / single-service deployments)
             if file_path is None:
@@ -626,10 +630,15 @@ def run_agent(self, query: str, session_id: str, language: str = "fr", file_id: 
                 if os.path.exists(local_path):
                     file_path = local_path
                     logger.info(f"Worker using local file: {file_path}")
+                else:
+                    logger.warning(f"Worker: local fallback path not found: {local_path}")
+        else:
+            logger.info(f"Worker: no file_id/user_id provided, running without file context")
 
         # Execute agent with query and optional file context
         dataset_path = file_path if file_path and file_path.lower().endswith(".csv") else None
         pdf_source = os.path.basename(file_path) if file_path and file_path.lower().endswith(".pdf") else None
+        logger.info(f"Worker calling master_run_agent: dataset_path={dataset_path!r} pdf_source={pdf_source!r}")
 
         result = master_run_agent(
             question=query,
