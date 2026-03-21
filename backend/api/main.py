@@ -60,7 +60,7 @@ RUN_STARTUP_MIGRATIONS = os.getenv("RUN_STARTUP_MIGRATIONS", "false").lower() ==
 if IS_PRODUCTION and RUN_STARTUP_MIGRATIONS:
     logger.info("Running database migrations...")
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "heads"],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
