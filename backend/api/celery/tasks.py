@@ -1131,7 +1131,20 @@ def index_document(self, file_id: str, user_id: str):
             _f.write(pdf_bytes)
         logger.info(f"PDF written to tmp: {tmp_path}")
 
-        # ── 3. Index into pgvector ───────────────────────────────────────────
+        # ── 3. Clear existing chunks for this source before re-indexing ─────
+        # Without this, every re-upload appends duplicate chunks.
+        # source stored in DB == os.path.basename(tmp_path) == file_id
+        from backend.engines.rag.vector_store import delete_source, get_indexed_sources
+        del_result = delete_source(file_id)
+        if del_result["success"]:
+            if del_result["deleted"] > 0:
+                logger.info(f"Cleared {del_result['deleted']} stale chunks for source={file_id!r}")
+            else:
+                logger.info(f"No existing chunks found for source={file_id!r} (first index)")
+        else:
+            logger.warning(f"Could not clear old chunks: {del_result['error']}")
+
+        # ── 4. Index into pgvector ───────────────────────────────────────────
         from backend.agent.tools.rag_tool import index_pdf  # lazy import
         result = index_pdf(tmp_path)
 
@@ -1142,6 +1155,18 @@ def index_document(self, file_id: str, user_id: str):
             )
         else:
             logger.error(f"✗ PDF indexing failed: {result['error']}")
+
+        # ── 5. Log full DB state for debugging ───────────────────────────────
+        sources = get_indexed_sources()
+        if sources:
+            total_chunks = sum(s["chunks"] for s in sources)
+            logger.info(
+                f"DB state after indexing — {total_chunks} total chunks across "
+                f"{len(sources)} source(s): "
+                + ", ".join(f"{s['source']}({s['chunks']})" for s in sources)
+            )
+        else:
+            logger.warning("DB state after indexing — documents table appears empty")
 
         return result
 

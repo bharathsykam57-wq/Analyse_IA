@@ -30,6 +30,7 @@ Usage:
     # For search: results = search_similar(query_embedding, top_k=5)
 """
 
+import hashlib
 import logging
 import os
 import psycopg2
@@ -209,18 +210,24 @@ def store_chunks(embedded_chunks: list[dict]) -> dict:
             with conn.cursor() as cur:
                 for chunk in embedded_chunks:
                     try:
-                        # UPSERT logic: insert or skip if (source, page_number, chunk_index) duplicate
+                        content = chunk.get("content", "")
+                        # Content-addressed dedup key: MD5[:16] of the chunk text.
+                        # Unique constraint on chunk_id means ON CONFLICT fires
+                        # correctly even when the same PDF is re-uploaded.
+                        chunk_id = hashlib.md5(content.encode()).hexdigest()[:16]
+
                         cur.execute("""
                             INSERT INTO documents
-                                (source, page_number, chunk_index, content, embedding)
-                            VALUES (%s, %s, %s, %s, %s::vector)
-                            ON CONFLICT DO NOTHING
+                                (source, page_number, chunk_index, content, embedding, chunk_id)
+                            VALUES (%s, %s, %s, %s, %s::vector, %s)
+                            ON CONFLICT (chunk_id) DO NOTHING
                         """, (
                             chunk.get("source", "unknown"),
                             chunk.get("page_number", chunk.get("page", 0)),
                             chunk.get("chunk_index", 0),
-                            chunk.get("content", ""),
-                            str(chunk.get("embedding", []))
+                            content,
+                            str(chunk.get("embedding", [])),
+                            chunk_id,
                         ))
 
                         if cur.rowcount > 0:
@@ -373,6 +380,35 @@ def get_document_count() -> int:
     except Exception as e:
         logger.error(f"✗ get_document_count failed: {str(e)}", exc_info=True)
         return 0
+    finally:
+        conn.close()
+
+
+def get_indexed_sources() -> list[dict]:
+    """Return chunk counts grouped by source — useful for post-index debugging.
+
+    Returns:
+        List of dicts: [{"source": str, "chunks": int}, ...] ordered by chunk
+        count descending. Empty list on connection failure.
+    """
+    conn = get_connection()
+    if not conn:
+        logger.warning("⚠ get_indexed_sources: cannot connect to DB")
+        return []
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT source, COUNT(*) AS chunks
+                    FROM documents
+                    GROUP BY source
+                    ORDER BY COUNT(*) DESC
+                """)
+                return [{"source": row[0], "chunks": row[1]} for row in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"✗ get_indexed_sources failed: {e}", exc_info=True)
+        return []
     finally:
         conn.close()
 
