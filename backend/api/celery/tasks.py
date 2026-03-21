@@ -1064,3 +1064,94 @@ def run_rag(self, query: str, file_path: str, session_id: str, language: str = "
         logger.error(f"RAG task failed: {e}")
         # Retry: 5-second delay, max 2 retries
         raise self.retry(exc=e, countdown=5, max_retries=2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF Indexing Task (RAG pre-processing)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@celery_app.task(
+    bind=True,
+    base=LoggedTask,
+    name="backend.api.celery.tasks.index_document",
+    queue="rag",
+)
+def index_document(self, file_id: str, user_id: str):
+    """Download PDF from Supabase Storage and index it into pgvector for RAG queries.
+
+    Called automatically after each successful PDF upload. Indexes the document
+    so that subsequent user questions about it can be answered via RAG.
+
+    Args:
+        file_id: The full filename stored in Supabase (e.g. "{uuid}_{name}.pdf")
+        user_id: Supabase storage path prefix (the user's UUID)
+
+    Flow:
+        1. Download PDF bytes from Supabase Storage → /tmp/{file_id}
+        2. Fallback to local filesystem if Supabase unavailable
+        3. Call index_pdf(/tmp/{file_id}) — chunk, embed, store in pgvector
+        4. Log result (inserted/skipped chunk counts)
+        5. Clean up /tmp file
+    """
+    task_id = self.request.id
+    logger.info(f"index_document started: file_id={file_id!r} user_id={user_id!r}")
+
+    tmp_path: str | None = None
+
+    try:
+        # ── 1. Download PDF ──────────────────────────────────────────────────
+        pdf_bytes: bytes | None = None
+
+        if _supabase is not None:
+            try:
+                storage_path = f"{user_id}/{file_id}"
+                logger.info(f"Downloading PDF from Supabase: {storage_path}")
+                pdf_bytes = _supabase.storage.from_("uploads").download(storage_path)
+                logger.info(f"Supabase download OK: {len(pdf_bytes)} bytes")
+            except Exception as _dl_err:
+                logger.warning(f"Supabase download failed, trying local: {_dl_err}")
+        else:
+            logger.warning("index_document: Supabase client is None, using local fallback")
+
+        if pdf_bytes is None:
+            local_path = os.path.join("uploads", user_id, file_id)
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as _f:
+                    pdf_bytes = _f.read()
+                logger.info(f"Using local PDF: {local_path}")
+            else:
+                logger.error(f"PDF not found locally either: {local_path}")
+                return {"success": False, "error": f"PDF not found: {file_id}"}
+
+        # ── 2. Write to /tmp for indexing ────────────────────────────────────
+        tmp_path = os.path.join("/tmp", file_id)
+        with open(tmp_path, "wb") as _f:
+            _f.write(pdf_bytes)
+        logger.info(f"PDF written to tmp: {tmp_path}")
+
+        # ── 3. Index into pgvector ───────────────────────────────────────────
+        from backend.agent.tools.rag_tool import index_pdf  # lazy import
+        result = index_pdf(tmp_path)
+
+        if result["success"]:
+            logger.info(
+                f"✓ PDF indexed: {result['source']} — "
+                f"{result['inserted']} chunks inserted, {result['skipped']} skipped"
+            )
+        else:
+            logger.error(f"✗ PDF indexing failed: {result['error']}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"index_document task failed: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=10, max_retries=1)
+
+    finally:
+        # ── 4. Clean up /tmp ─────────────────────────────────────────────────
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+                logger.debug(f"Cleaned up tmp file: {tmp_path}")
+            except Exception as _cleanup_err:
+                logger.warning(f"Failed to clean up {tmp_path}: {_cleanup_err}")

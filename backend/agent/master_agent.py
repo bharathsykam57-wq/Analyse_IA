@@ -248,6 +248,36 @@ def classify_task(state: AgentState) -> AgentState:
     logger.info(f"Language detected: {language}")
 
     # ═══════════════════════════════════════════════════════════════════════════════
+    # STAGE 0 — File-type forced routing (highest priority, no LLM needed)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # If the uploaded file is a PDF, always route to RAG (keyword matching would
+    # often misroute PDF questions to analysis).  If the file is a CSV, always
+    # route to analysis.  Only fall through to keyword/LLM when file type is
+    # ambiguous (no file, or unknown extension).
+    pdf_source = state.get("pdf_source")
+    dataset_path = state.get("dataset_path")
+
+    if pdf_source:
+        logger.info(f"File-type routing: PDF detected ({pdf_source}) → rag")
+        return {
+            **state,
+            "language": language,
+            "task_type": "rag",
+            "confidence_score": 1.0,
+            "steps_taken": state.get("steps_taken", []) + ["classify → rag (file_type=pdf, conf=1.00)"],
+        }
+
+    if dataset_path:
+        logger.info(f"File-type routing: CSV detected ({dataset_path}) → analysis")
+        return {
+            **state,
+            "language": language,
+            "task_type": "analysis",
+            "confidence_score": 1.0,
+            "steps_taken": state.get("steps_taken", []) + ["classify → analysis (file_type=csv, conf=1.00)"],
+        }
+
+    # ═══════════════════════════════════════════════════════════════════════════════
     # STAGE 1 — Keyword-based classification (fast, <10ms, no LLM call)
     # ═══════════════════════════════════════════════════════════════════════════════
     question_lower = question.lower()
@@ -572,7 +602,10 @@ def run_rag_node(state: AgentState) -> AgentState:
         logger.info("No documents indexed yet for RAG search")
 
     # EXECUTE: Call Phase 2 RAG tool (blocks 5-35 seconds)
-    result = ask_document(question, pdf_source=state.get("pdf_source"))
+    pdf_source = state.get("pdf_source")
+    if pdf_source:
+        logger.info(f"RAG source filter: {pdf_source}")
+    result = ask_document(question, pdf_source=pdf_source)
 
     # RESULT HANDLING: Check tool success flag
     if not result["success"]:
