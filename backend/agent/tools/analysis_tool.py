@@ -78,6 +78,50 @@ from backend.engines.analysis.anomaly_detector import detect_anomalies
 logger = logging.getLogger(__name__)
 
 
+# Keywords that strongly hint a column is a binary classification target
+_TARGET_KEYWORDS = [
+    "churn", "target", "label", "fraud", "default", "attrition",
+    "survived", "outcome", "result", "churned", "cancelled",
+    "converted", "purchased", "clicked", "defaulted"
+]
+
+
+def _auto_detect_target_column(df) -> str | None:
+    """Auto-detect the best candidate target column for supervised ML.
+
+    Priority order:
+    1. Binary columns whose name contains a target-related keyword.
+    2. Any binary column whose values are 0/1, Yes/No, or True/False.
+    3. Returns None if no suitable column found (caller skips AutoML).
+
+    Args:
+        df: Loaded pandas DataFrame.
+
+    Returns:
+        str or None: Best candidate column name, or None.
+    """
+    binary_value_sets = [
+        {0, 1}, {0.0, 1.0},
+        {"yes", "no"}, {"Yes", "No"}, {"YES", "NO"},
+        {True, False}, {"true", "false"}, {"True", "False"},
+    ]
+
+    # Priority 1: binary + keyword in name
+    for col in df.columns:
+        if df[col].nunique() == 2:
+            if any(kw in col.lower() for kw in _TARGET_KEYWORDS):
+                return col
+
+    # Priority 2: binary with canonical 0/1, Yes/No, True/False values
+    for col in df.columns:
+        if df[col].nunique() == 2:
+            vals = set(df[col].dropna().unique())
+            if any(vals == pat for pat in binary_value_sets):
+                return col
+
+    return None
+
+
 def run_analysis(dataset_path: str, target_column: str = None) -> dict:
     """Execute complete analysis pipeline on CSV dataset with all Phase 1 engines.
 
@@ -241,6 +285,21 @@ def run_analysis(dataset_path: str, target_column: str = None) -> dict:
       return {"success": False, "error": "Dataset non chargé correctement"}
     rows, cols = df.shape
     logger.info(f"✓ Dataset loaded: {rows:,} rows, {cols} columns")
+
+    # TARGET COLUMN RESOLUTION
+    # - If target_column was provided by caller (from LLM extraction), keep it.
+    # - Otherwise attempt auto-detection from binary columns.
+    # - Log the method used for observability.
+    if target_column is not None:
+        target_method = "llm_extraction"
+    else:
+        auto_target = _auto_detect_target_column(df)
+        if auto_target:
+            target_column = auto_target
+            target_method = "auto_detection"
+        else:
+            target_method = "none"
+    logger.info(f"Target column selected: {target_column} (method: {target_method})")
 
     # STAGE 2/5 — EXPLORATORY DATA ANALYSIS (EDA)
     # Generate statistical insights:

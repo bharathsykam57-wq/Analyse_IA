@@ -89,6 +89,7 @@ Future Enhancements:
 """
 
 import logging
+import re
 from typing import Literal
 from langgraph.graph import StateGraph, END
 import os
@@ -237,6 +238,8 @@ def classify_task(state: AgentState) -> AgentState:
     - Typical total: <50ms for common keywords
     """
     question = state["question"]
+    # Strip UUID prefix (e.g. "550e8400-e29b-41d4-a716-446655440000_") from question
+    question = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', '', question)
     logger.info(f"Classifying task: {question[:80]}")
 
     # Detect language from original question before history appended
@@ -396,6 +399,50 @@ Réponds UNIQUEMENT avec 'analysis', 'code' ou 'rag'."""
         return "rag"
 
 
+def _extract_target_column_with_llm(dataset_path: str, question: str):
+    """Use LLM to identify the target column the user wants to predict.
+
+    Loads column names from the dataset, then asks the LLM which column
+    the user is referring to as the prediction target.
+
+    Args:
+        dataset_path: Path to the CSV dataset.
+        question: User's question (UUID-stripped).
+
+    Returns:
+        str or None: Exact column name if found in dataset, else None.
+    """
+    try:
+        from backend.engines.analysis.dataset_loader import load_dataset
+        load_result = load_dataset(dataset_path)
+        if load_result.get("error") or load_result.get("dataframe") is None:
+            return None
+        column_names = list(load_result["dataframe"].columns)
+
+        llm = get_llm()
+        prompt = (
+            f"Given these columns: {column_names}\n"
+            f"And this user question: {question}\n"
+            f"What is the target column the user wants to predict?\n"
+            f"Reply with ONLY the exact column name, or NONE if no target column is mentioned or implied."
+        )
+        response = llm.invoke([HumanMessage(content=prompt)])
+        result = response.content.strip()
+
+        if not result or result.upper() == "NONE":
+            return None
+        if result in column_names:
+            return result
+        # LLM may return the name with extra whitespace or quotes — try a cleaned match
+        cleaned = result.strip('"\'').strip()
+        if cleaned in column_names:
+            return cleaned
+        return None
+    except Exception as e:
+        logger.warning(f"LLM target column extraction failed: {e}")
+        return None
+
+
 # ═══════════════════════════════════════════
 # NODE 2a — Run analysis tool
 # ═══════════════════════════════════════════
@@ -438,9 +485,26 @@ def run_analysis_node(state: AgentState) -> AgentState:
             "steps_taken": state.get("steps_taken", []) + ["analysis → no dataset"]
         }
 
+    # FIX 3: Strip UUID prefix from question before processing
+    question = re.sub(
+        r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_',
+        '',
+        state.get("question", "")
+    )
+
+    # FIX 1: Extract target column from question via LLM
+    target_column = state.get("target_column")
+    if not target_column:
+        logger.info("Extracting target column from question via LLM...")
+        target_column = _extract_target_column_with_llm(dataset_path, question)
+        if target_column:
+            logger.info(f"Target column extracted by LLM: {target_column}")
+        else:
+            logger.info("LLM returned NONE — auto-detection will run inside analysis tool")
+
     # EXECUTE: Call Phase 1 analysis tool (blocks 10-40 seconds)
     logger.info(f"Running analysis on: {dataset_path}")
-    result = run_analysis(dataset_path)
+    result = run_analysis(dataset_path, target_column)
 
     # RESULT HANDLING: Check tool success flag
     if not result["success"]:
