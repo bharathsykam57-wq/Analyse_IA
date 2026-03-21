@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Optional
 
 # ── HuggingFace cache directory ───────────────────────────────────────────────
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Must stay 384-dim to match the pgvector column definition (vector(384)).
 # Override via EMBED_MODEL env var — but run the Alembic migration if you change dimension.
 EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
+BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "8"))   # small batches to limit memory per step
 
 _model: SentenceTransformer | None = None
 
@@ -89,8 +90,9 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     model = _get_model()
     embedded: list[dict] = []
     failed = 0
+    total = len(chunks)
 
-    for i in range(0, len(chunks), BATCH_SIZE):
+    for i in range(0, total, BATCH_SIZE):
         batch = chunks[i : i + BATCH_SIZE]
         texts = [str(chunk.get("content", "")).strip() for chunk in batch]
 
@@ -108,9 +110,18 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
             chunk_with_embedding = {**chunk, "embedding": vector.astype("float32").tolist()}
             embedded.append(chunk_with_embedding)
 
-    success_rate = (len(embedded) / len(chunks) * 100) if chunks else 0.0
+        # Progress log every 50 chunks so Railway logs show the task is alive
+        processed = i + len(batch)
+        if processed % 50 == 0 or processed == total:
+            logger.info(f"Embedded {processed}/{total} chunks...")
+
+        # Short pause between batches to avoid memory buildup on CPU inference
+        if i + BATCH_SIZE < total:
+            time.sleep(0.1)
+
+    success_rate = (len(embedded) / total * 100) if total else 0.0
     logger.info(
-        f"✓ Embedding batch complete: {len(embedded)}/{len(chunks)} chunks embedded "
+        f"✓ Embedding complete: {len(embedded)}/{total} chunks embedded "
         f"({success_rate:.1f}% success rate, {failed} failed)"
     )
     return embedded

@@ -92,6 +92,15 @@ from backend.engines.rag.document_loader import load_and_chunk_pdf
 from backend.engines.rag.embedding_engine import embed_chunks
 from backend.engines.rag.vector_store import store_chunks, get_document_count, delete_source
 
+# Maximum chunks to index per PDF.  First MAX_CHUNKS chunks ≈ first ~100 pages for a
+# typical PDF.  Prevents very large documents from timing out the Celery task.
+# Override via RAG_MAX_CHUNKS env var.
+MAX_CHUNKS = int(os.getenv("RAG_MAX_CHUNKS", "300"))
+
+# Number of chunks embedded + stored per mini-batch inside index_pdf.
+# Smaller value = more frequent DB commits = better partial-success on timeout.
+INDEXING_MINI_BATCH = int(os.getenv("RAG_INDEXING_MINI_BATCH", "50"))
+
 logger = logging.getLogger(__name__)
 
 
@@ -307,11 +316,6 @@ def index_pdf(pdf_path: str) -> dict:
     logger.info(f"Indexing PDF: {pdf_path}")
 
     # STAGE 1: LOAD & CHUNK PDF
-    # - Extract text with pypdf (handles text-based and image-heavy PDFs)
-    # - Split with sliding-window (500 chars text, 50 char overlap for context continuity)
-    # - Output: chunks = [{"source": str, "page": int, "content": str, ...}]
-    # - Typical: 100-300 chunks for CNIL-size document
-    # - Errors: File not found, not PDF, PDF corrupted, not readable, etc.
     load_result = load_and_chunk_pdf(pdf_path)
     if not load_result["success"]:
         return {"success": False, "error": load_result["error"]}
@@ -320,46 +324,73 @@ def index_pdf(pdf_path: str) -> dict:
     if not chunks:
         return {"success": False, "error": "Aucun contenu extrait du PDF"}
 
-    # STAGE 2: EMBED CHUNKS
-    # - Convert each chunk to 768-dimensional vector (nomic-embed-text)
-    # - Batch processing with graceful fallback for failed chunks
-    # - Output: embedded = [{"source": str, "embedding": [0.1, 0.2, ...], ...}]
-    # - Typical: 50-100ms per chunk
-    # - Errors: Ollama offline, GPU out of memory, connection timeout
-    embedded = embed_chunks(chunks)
-    if not embedded:
+    # STAGE 1b: TRUNCATE FOR VERY LARGE PDFs
+    # MAX_CHUNKS guards against 300+ page documents timing out the Celery task.
+    # First MAX_CHUNKS chunks represent the first ~100 pages (at 3 chunks/page).
+    if len(chunks) > MAX_CHUNKS:
+        logger.warning(
+            f"⚠ PDF has {len(chunks)} chunks (>{MAX_CHUNKS}), "
+            f"truncating to first {MAX_CHUNKS} chunks "
+            f"(≈first {MAX_CHUNKS // 3} pages). "
+            "Set RAG_MAX_CHUNKS env var to increase the limit."
+        )
+        chunks = chunks[:MAX_CHUNKS]
+
+    # STAGE 2 + 3: EMBED AND STORE IN MINI-BATCHES
+    # Processing INDEXING_MINI_BATCH chunks at a time and committing each batch to
+    # pgvector immediately.  This means partial results survive a timeout — chunks
+    # already stored are queryable even if the task is interrupted later.
+    total_inserted = 0
+    total_skipped = 0
+    total_failed = 0
+    total = len(chunks)
+
+    for batch_start in range(0, total, INDEXING_MINI_BATCH):
+        mini_batch = chunks[batch_start : batch_start + INDEXING_MINI_BATCH]
+        batch_end = batch_start + len(mini_batch)
+        logger.info(f"Processing chunks {batch_start + 1}–{batch_end}/{total}...")
+
+        embedded = embed_chunks(mini_batch)
+        if not embedded:
+            logger.error(
+                f"✗ Embedding failed for chunks {batch_start}–{batch_end} "
+                f"(EMBED_MODEL={os.getenv('EMBED_MODEL', 'default')})"
+            )
+            total_failed += len(mini_batch)
+            continue
+
+        store_result = store_chunks(embedded)
+        if store_result["success"]:
+            total_inserted += store_result["inserted"]
+            total_skipped += store_result["skipped"]
+            total_failed += store_result.get("failed", 0)
+        else:
+            logger.error(f"✗ Store failed for chunks {batch_start}–{batch_end}: {store_result['error']}")
+            total_failed += len(embedded)
+
+    if total_inserted == 0 and total_skipped == 0:
         return {
             "success": False,
             "error": (
-                f"Échec de l'embedding des chunks ({len(chunks)} chunks extraits). "
-                "Vérifiez que le modèle sentence-transformers est disponible "
-                f"(EMBED_MODEL={os.getenv('EMBED_MODEL', 'default')})."
-            )
+                f"Aucun chunk indexé ({total_failed} échoués sur {total}). "
+                "Vérifiez que le modèle sentence-transformers est disponible."
+            ),
         }
-
-    # STAGE 3: STORE IN PGVECTOR
-    # - INSERT chunks with ON CONFLICT DO NOTHING (UPSERT)
-    # - Unique constraint: (source, page, chunk_index)
-    # - Duplicates silently skipped (no error, no data corruption)
-    # - Output: {"success": bool, "inserted": int, "skipped": int}
-    # - Idempotent: Second run of same PDF inserts 0 new chunks
-    # - Typical: 500ms-2s for 100+ chunks
-    store_result = store_chunks(embedded)
-    if not store_result["success"]:
-        return {"success": False, "error": store_result["error"]}
 
     logger.info(
         f"✓ PDF indexed: {load_result['source']} — "
-        f"{store_result['inserted']} inserted, {store_result['skipped']} skipped"
+        f"{total_inserted} inserted, {total_skipped} skipped, {total_failed} failed "
+        f"(out of {total} chunks)"
     )
 
     return {
         "success": True,
         "source": load_result["source"],
-        "total_chunks": load_result["total_chunks"],
-        "inserted": store_result["inserted"],
-        "skipped": store_result["skipped"],
-        "error": None
+        "total_chunks": total,
+        "inserted": total_inserted,
+        "skipped": total_skipped,
+        "failed": total_failed,
+        "error": None,
     }
 
 

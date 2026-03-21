@@ -1075,8 +1075,8 @@ def run_rag(self, query: str, file_path: str, session_id: str, language: str = "
     base=LoggedTask,
     name="backend.api.celery.tasks.index_document",
     queue="rag",
-    soft_time_limit=120,
-    time_limit=150,
+    soft_time_limit=600,
+    time_limit=660,
 )
 def index_document(self, file_id: str, user_id: str):
     """Download PDF from Supabase Storage and index it into pgvector for RAG queries.
@@ -1148,12 +1148,45 @@ def index_document(self, file_id: str, user_id: str):
     except Exception as e:
         from celery.exceptions import SoftTimeLimitExceeded
         if isinstance(e, SoftTimeLimitExceeded):
+            # Query DB for how many chunks were committed before the timeout.
+            # With mini-batch indexing, chunks are stored incrementally so partial
+            # results may already be in pgvector and usable for RAG queries.
+            inserted_before_timeout = 0
+            try:
+                from backend.engines.rag.vector_store import get_connection
+                _conn = get_connection()
+                if _conn:
+                    with _conn.cursor() as _cur:
+                        _cur.execute(
+                            "SELECT COUNT(*) FROM documents WHERE source = %s",
+                            (file_id,),
+                        )
+                        inserted_before_timeout = _cur.fetchone()[0]
+                    _conn.close()
+            except Exception as _qe:
+                logger.warning(f"Could not query partial chunk count: {_qe}")
+
             logger.error(
-                f"✗ index_document timed out after 120s for file_id={file_id!r}. "
-                "Likely cause: embedding model downloading on first run. "
-                "Call warm_embedding_model task on worker startup to pre-download."
+                f"✗ index_document timed out after 600s for file_id={file_id!r}. "
+                f"{inserted_before_timeout} chunk(s) were stored before timeout. "
+                "Call warm_embedding_model on worker startup to pre-download the model."
             )
-            return {"success": False, "error": "Embedding timed out (120s). Model may still be downloading."}
+            if inserted_before_timeout > 0:
+                return {
+                    "success": True,
+                    "partial": True,
+                    "inserted": inserted_before_timeout,
+                    "skipped": 0,
+                    "error": (
+                        f"Partial index: timed out after 600s, "
+                        f"{inserted_before_timeout} chunks stored. "
+                        "Re-upload the PDF to index remaining pages."
+                    ),
+                }
+            return {
+                "success": False,
+                "error": "Embedding timed out (600s). No chunks stored — model may still be downloading.",
+            }
         logger.error(f"index_document task failed: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=10, max_retries=1)
 
