@@ -709,7 +709,12 @@ async def rgpd_scan(
     # ── 2. Parse header row only (lightweight — no pandas required) ──────────
     try:
         text = csv_bytes.decode("utf-8", errors="replace")
-        reader = csv.reader(io.StringIO(text))
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=',;\t|')
+            delimiter = dialect.delimiter
+        except csv.Error:
+            delimiter = ','
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
         columns = next(reader, [])
     except Exception as _parse_err:
         raise HTTPException(

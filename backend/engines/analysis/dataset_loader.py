@@ -15,6 +15,7 @@ Typical usage:
 """
 import os
 import logging
+import csv as _csv
 import pandas as pd
 from pathlib import Path
 from dotenv import load_dotenv
@@ -83,6 +84,30 @@ def detect_encoding(file_path: str) -> str:
     # Fallback: if no encoding works, default to utf-8 and log warning
     logger.warning(f"Could not detect encoding for {file_path}, defaulting to utf-8")
     return 'utf-8'
+
+
+def detect_separator(file_path: str, encoding: str) -> str:
+    """Detect the CSV column separator using csv.Sniffer on a file sample.
+
+    Checks the four most common delimiters used in French and international
+    datasets: comma (,), semicolon (;), tab (\\t), and pipe (|).
+    SNCF and many French government open-data files use semicolons.
+
+    Args:
+        file_path: Path to the CSV file.
+        encoding: Character encoding to use when reading the sample.
+
+    Returns:
+        Single-character delimiter string. Defaults to ',' on any error.
+    """
+    try:
+        with open(file_path, 'r', encoding=encoding) as f:
+            sample = f.read(4096)
+        dialect = _csv.Sniffer().sniff(sample, delimiters=',;\t|')
+        logger.info(f"Detected separator: {repr(dialect.delimiter)} for {Path(file_path).name}")
+        return dialect.delimiter
+    except Exception:
+        return ','  # default fallback
 
 
 def get_column_types(df: pd.DataFrame) -> dict:
@@ -288,17 +313,20 @@ def load_dataset(file_path: str) -> dict:
 
         logger.info(f"File has {row_count:,} rows: {Path(file_path).name}")
 
+        # STEP 2b: Auto-detect CSV separator (comma, semicolon, tab, pipe)
+        separator = detect_separator(file_path, encoding)
+
         # STEP 3: Load dataset with appropriate strategy based on size
         # Load full dataset if it fits within memory constraints (≤100,000 rows).
         if row_count <= MAX_ROWS_FULL_LOAD:
-            df = pd.read_csv(file_path, encoding=encoding)
+            df = pd.read_csv(file_path, encoding=encoding, sep=separator)
             result['truncated'] = False
             logger.info(f"Loaded full dataset: {row_count:,} rows")
         else:
             # For large datasets, load only the first chunk for inspection and metadata.
             # The full dataset can be processed later using chunked iteration if needed
             # This prevents memory exhaustion while still providing data structure info
-            df = pd.read_csv(file_path, encoding=encoding, nrows=MAX_ROWS_FULL_LOAD)
+            df = pd.read_csv(file_path, encoding=encoding, sep=separator, nrows=MAX_ROWS_FULL_LOAD)
             result['truncated'] = True
             logger.warning(
                 f"Dataset has {row_count:,} rows. "
