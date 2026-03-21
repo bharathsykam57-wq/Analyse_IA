@@ -28,6 +28,7 @@ import json
 import csv
 import io as _io
 import os
+import unicodedata as _unicodedata
 import redis
 from celery.result import AsyncResult
 
@@ -44,23 +45,64 @@ logger = logging.getLogger(__name__)
 
 REDIS_URL = get_redis_url()
 
-# ── RGPD quick-scan helpers (subset of files.py classification) ────────────────
-_RGPD_HIGH_KEYWORDS = {
-    "email", "mail", "phone", "telephone", "tel", "mobile",
-    "nom", "name", "prenom", "firstname", "lastname", "surname",
-    "adresse", "address", "rue", "street",
-    "ssn", "nss", "securite_sociale", "national_id",
-    "passport", "carte_identite", "cin",
-    "ip_address", "ip", "device_id",
-    "date_naissance", "birthdate", "birthday", "dob",
-}
+# ── RGPD quick-scan helpers (Tier 1 exact match, mirrors files.py) ────────────
+# Exact normalized keys for high-risk columns (subset of files.py _HIGH_EXACT).
+# Uses the same _normalize_col_agent() normalization so results are consistent.
+_RGPD_HIGH_EXACT_KEYS: frozenset[str] = frozenset({
+    "email", "e_mail", "courriel", "adresse_email", "adresse_mail",
+    "mail", "email_address", "user_email", "contact_email",
+    "telephone", "tel", "mobile", "portable", "phone", "phone_number",
+    "numero_telephone", "num_tel", "gsm",
+    "nom", "name", "last_name", "lastname", "surname", "family_name",
+    "prenom", "first_name", "firstname", "given_name",
+    "nom_complet", "full_name", "nom_prenom", "prenoms",
+    "adresse", "address", "rue", "street", "adresse_postale",
+    "adresse_domicile", "adresse_livraison", "adresse_facturation",
+    "numero_rue", "code_postal", "postal_code", "zip", "zip_code",
+    "ville", "city", "commune", "localite",
+    "pays", "country", "region", "departement",
+    "nss", "numero_securite_sociale", "securite_sociale", "social_security",
+    "ssn", "national_id", "id_national", "numero_national",
+    "numero_identite", "cin", "carte_identite", "cni",
+    "passport", "passeport", "numero_passport", "numero_passeport",
+    "permis_conduire", "driver_license", "drivers_license",
+    "ip", "ip_address", "adresse_ip", "ipv4", "ipv6",
+    "device_id", "mac_address", "user_agent", "cookie_id",
+    "date_naissance", "date_de_naissance", "birthdate", "birth_date",
+    "birthday", "dob", "annee_naissance", "age",
+    "genre", "gender", "sexe", "sex",
+    "iban", "bic", "numero_compte", "compte_bancaire", "bank_account",
+    "carte_credit", "credit_card", "numero_carte", "card_number",
+    "mot_de_passe", "password", "mdp", "pwd", "secret",
+    "token", "access_token", "refresh_token", "api_key", "auth_token",
+    "salaire", "salary", "revenu", "income", "remuneration",
+    "religion", "origine_ethnique", "ethnicity", "race",
+    "sante", "health", "medical", "diagnostic", "maladie",
+    "biometrie", "biometric", "empreinte", "fingerprint",
+    "gps", "latitude", "longitude", "geolocation", "localisation",
+    "user_id", "client_id", "customer_id", "account_id", "identifiant",
+    "username", "login", "pseudo", "handle",
+    "photo", "avatar", "image_profil", "profile_picture",
+    "signature", "face_id",
+    "orientation_sexuelle", "sexual_orientation",
+    "conviction_politique", "opinion_politique", "political_opinion",
+    "appartenance_syndicale", "union_membership",
+    "donnee_genetique", "genetic_data",
+})
+
+
+def _normalize_col_agent(col: str) -> str:
+    """Same normalization as files.py _normalize_col() for consistent matching."""
+    normalized = _unicodedata.normalize("NFD", col.lower())
+    stripped = "".join(c for c in normalized if _unicodedata.category(c) != "Mn")
+    return stripped.replace(" ", "_").replace("-", "_")
 
 
 def _rgpd_quick_scan(file_id: Optional[str], user_id: str) -> list[str]:
     """Return list of high-risk column names found in the CSV header.
 
-    Reads only the header row (no full file parse). Used to attach RGPD
-    audit metadata to the Celery task before dispatch. Non-fatal: returns
+    Reads only the header row (no full file parse). Uses Tier 1 exact match
+    (same logic as files.py) to avoid false positives. Non-fatal: returns
     empty list on any error so task dispatch is never blocked.
     """
     if not file_id:
@@ -94,8 +136,7 @@ def _rgpd_quick_scan(file_id: Optional[str], user_id: str) -> list[str]:
 
         risky = []
         for col in columns:
-            lower = col.lower().replace(" ", "_")
-            if any(kw in lower for kw in _RGPD_HIGH_KEYWORDS):
+            if _normalize_col_agent(col) in _RGPD_HIGH_EXACT_KEYS:
                 risky.append(col)
         return risky
 

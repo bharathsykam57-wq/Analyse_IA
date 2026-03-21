@@ -208,9 +208,14 @@ export default function AgentChatPage() {
               {rgpdResult.columns.map((col) => (
                 <div key={col.name} className="flex items-start gap-2 text-sm bg-white/[0.03] border border-white/5 rounded-lg px-3 py-2">
                   <span className="flex-shrink-0 mt-0.5">{col.risk === 'high' ? '🔴' : '🟡'}</span>
-                  <div className="min-w-0">
-                    <span className="text-white font-semibold">{col.name}</span>
-                    <span className="text-gray-400"> — {col.reason}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-white font-semibold">{col.name}</span>
+                      {col.confidence !== undefined && (
+                        <span className="text-gray-500 text-xs">{Math.round(col.confidence * 100)}% confiance</span>
+                      )}
+                    </div>
+                    <span className="text-gray-400">{col.reason}</span>
                     {col.article && (
                       <span className="ml-1 text-blue-400 text-xs">({col.article})</span>
                     )}

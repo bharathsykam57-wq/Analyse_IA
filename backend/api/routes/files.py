@@ -52,6 +52,7 @@ import os
 import uuid
 import io
 import csv
+import unicodedata as _unicodedata
 import logging
 from backend.monitoring.analytics_tracker import log_analytics_event_sync
 
@@ -588,79 +589,246 @@ async def list_files(
 # RGPD Personal Data Scanner
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# High-risk: direct personal identifiers (RGPD Art. 4(1))
-_RGPD_HIGH: dict[str, str] = {
-    "email":            "Identifiant personnel — Adresse e-mail",
-    "mail":             "Identifiant personnel — Adresse e-mail",
-    "phone":            "Identifiant personnel — Numéro de téléphone",
-    "telephone":        "Identifiant personnel — Numéro de téléphone",
-    "tel":              "Identifiant personnel — Numéro de téléphone",
-    "mobile":           "Identifiant personnel — Numéro de mobile",
-    "nom":              "Identifiant personnel — Nom de famille",
-    "name":             "Identifiant personnel — Nom complet",
-    "prenom":           "Identifiant personnel — Prénom",
-    "firstname":        "Identifiant personnel — Prénom",
-    "lastname":         "Identifiant personnel — Nom de famille",
-    "surname":          "Identifiant personnel — Nom de famille",
-    "adresse":          "Identifiant personnel — Adresse postale",
-    "address":          "Identifiant personnel — Adresse postale",
-    "rue":              "Identifiant personnel — Rue",
-    "street":           "Identifiant personnel — Street address",
-    "ssn":              "Identifiant personnel — Numéro de sécurité sociale",
-    "nss":              "Identifiant personnel — Numéro de sécurité sociale",
-    "securite_sociale": "Identifiant personnel — Numéro de sécurité sociale",
-    "national_id":      "Identifiant personnel — Numéro national d'identité",
-    "passport":         "Identifiant personnel — Numéro de passeport",
-    "carte_identite":   "Identifiant personnel — Carte d'identité",
-    "cin":              "Identifiant personnel — Carte d'identité nationale",
-    "ip_address":       "Identifiant personnel — Adresse IP",
-    "ip":               "Identifiant personnel — Adresse IP",
-    "device_id":        "Identifiant personnel — Identifiant d'appareil",
-    "date_naissance":   "Identifiant personnel — Date de naissance",
-    "birthdate":        "Identifiant personnel — Date de naissance",
-    "birthday":         "Identifiant personnel — Date de naissance",
-    "dob":              "Identifiant personnel — Date of Birth",
+# ── Tier 1 — Exact match (confidence 1.0) ────────────────────────────────────
+_HIGH_EXACT: dict[str, str] = {
+    "email":                "Identifiant personnel — Adresse e-mail",
+    "mail":                 "Identifiant personnel — Adresse e-mail",
+    "e_mail":               "Identifiant personnel — Adresse e-mail",
+    "courriel":             "Identifiant personnel — Adresse e-mail",
+    "phone":                "Identifiant personnel — Numéro de téléphone",
+    "telephone":            "Identifiant personnel — Numéro de téléphone",
+    "tel":                  "Identifiant personnel — Numéro de téléphone",
+    "mobile":               "Identifiant personnel — Numéro de mobile",
+    "portable":             "Identifiant personnel — Numéro de mobile",
+    "gsm":                  "Identifiant personnel — Numéro de mobile",
+    "fax":                  "Identifiant personnel — Numéro de fax",
+    "nom":                  "Identifiant personnel — Nom de famille",
+    "prenom":               "Identifiant personnel — Prénom",
+    "name":                 "Identifiant personnel — Nom complet",
+    "firstname":            "Identifiant personnel — Prénom",
+    "lastname":             "Identifiant personnel — Nom de famille",
+    "surname":              "Identifiant personnel — Nom de famille",
+    "fullname":             "Identifiant personnel — Nom complet",
+    "full_name":            "Identifiant personnel — Nom complet",
+    "nom_complet":          "Identifiant personnel — Nom complet",
+    "adresse":              "Identifiant personnel — Adresse postale",
+    "address":              "Identifiant personnel — Adresse postale",
+    "rue":                  "Identifiant personnel — Rue",
+    "street":               "Identifiant personnel — Rue",
+    "voie":                 "Identifiant personnel — Voie",
+    "ssn":                  "Identifiant personnel — Numéro de sécurité sociale",
+    "nss":                  "Identifiant personnel — Numéro de sécurité sociale",
+    "secu":                 "Identifiant personnel — Numéro de sécurité sociale",
+    "securite_sociale":     "Identifiant personnel — Numéro de sécurité sociale",
+    "national_id":          "Identifiant personnel — Numéro national d'identité",
+    "id_national":          "Identifiant personnel — Numéro national d'identité",
+    "cin":                  "Identifiant personnel — Carte d'identité nationale",
+    "cni":                  "Identifiant personnel — Carte d'identité nationale",
+    "passport":             "Identifiant personnel — Numéro de passeport",
+    "passeport":            "Identifiant personnel — Numéro de passeport",
+    "carte_identite":       "Identifiant personnel — Carte d'identité",
+    "ip":                   "Identifiant personnel — Adresse IP",
+    "ip_address":           "Identifiant personnel — Adresse IP",
+    "adresse_ip":           "Identifiant personnel — Adresse IP",
+    "device_id":            "Identifiant personnel — Identifiant d'appareil",
+    "identifiant_appareil": "Identifiant personnel — Identifiant d'appareil",
+    "mac_address":          "Identifiant personnel — Adresse MAC",
+    "date_naissance":       "Identifiant personnel — Date de naissance",
+    "dob":                  "Identifiant personnel — Date de naissance",
+    "birthdate":            "Identifiant personnel — Date de naissance",
+    "birthday":             "Identifiant personnel — Date de naissance",
+    "naissance":            "Identifiant personnel — Date de naissance",
+    "birth_date":           "Identifiant personnel — Date de naissance",
+    "user_id":              "Identifiant personnel — Identifiant utilisateur",
+    "userid":               "Identifiant personnel — Identifiant utilisateur",
+    "client_id":            "Identifiant personnel — Identifiant client",
+    "clientid":             "Identifiant personnel — Identifiant client",
+    "customer_id":          "Identifiant personnel — Identifiant client",
+    "customerid":           "Identifiant personnel — Identifiant client",
+    "patient_id":           "Identifiant personnel — Identifiant patient",
+    "employee_id":          "Identifiant personnel — Identifiant employé",
+    "employeeid":           "Identifiant personnel — Identifiant employé",
+    "matricule":            "Identifiant personnel — Matricule",
+    "identifiant":          "Identifiant personnel — Identifiant",
+    "identifier":           "Identifiant personnel — Identifiant",
+    "login":                "Identifiant personnel — Login",
+    "username":             "Identifiant personnel — Nom d'utilisateur",
+    "password":             "Identifiant personnel — Mot de passe",
+    "mot_de_passe":         "Identifiant personnel — Mot de passe",
+    "mdp":                  "Identifiant personnel — Mot de passe",
+    "pwd":                  "Identifiant personnel — Mot de passe",
+    "token":                "Identifiant personnel — Jeton d'authentification",
+    "secret":               "Identifiant personnel — Secret",
+    "api_key":              "Identifiant personnel — Clé API",
+    "apikey":               "Identifiant personnel — Clé API",
+    "iban":                 "Identifiant personnel — IBAN (données bancaires)",
+    "bic":                  "Identifiant personnel — BIC (données bancaires)",
+    "swift":                "Identifiant personnel — SWIFT (données bancaires)",
+    "compte_bancaire":      "Identifiant personnel — Compte bancaire",
+    "carte_credit":         "Identifiant personnel — Carte de crédit",
+    "credit_card":          "Identifiant personnel — Carte de crédit",
+    "cvv":                  "Identifiant personnel — CVV (carte bancaire)",
+    "pan":                  "Identifiant personnel — PAN (numéro de carte)",
+    "numero_secu":          "Identifiant personnel — Numéro de sécurité sociale",
+    "numero_client":        "Identifiant personnel — Numéro client",
+    "numero_employe":       "Identifiant personnel — Numéro employé",
 }
 
-# Medium-risk: quasi-identifiers (RGPD Art. 4(1) / Art. 9)
-_RGPD_MEDIUM: dict[str, tuple[str, str]] = {
-    "age":          ("Quasi-identifiant — Âge",                          "RGPD Article 4(1)"),
-    "genre":        ("Quasi-identifiant — Genre",                        "RGPD Article 4(1)"),
-    "gender":       ("Quasi-identifiant — Gender",                       "RGPD Article 4(1)"),
-    "sexe":         ("Quasi-identifiant — Sexe",                         "RGPD Article 4(1)"),
-    "sex":          ("Quasi-identifiant — Sex",                          "RGPD Article 4(1)"),
-    "ville":        ("Quasi-identifiant — Ville",                        "RGPD Article 4(1)"),
-    "city":         ("Quasi-identifiant — City",                         "RGPD Article 4(1)"),
-    "pays":         ("Quasi-identifiant — Pays",                         "RGPD Article 4(1)"),
-    "country":      ("Quasi-identifiant — Country",                      "RGPD Article 4(1)"),
-    "region":       ("Quasi-identifiant — Région",                       "RGPD Article 4(1)"),
-    "code_postal":  ("Quasi-identifiant — Code postal",                  "RGPD Article 4(1)"),
-    "zip":          ("Quasi-identifiant — ZIP code",                     "RGPD Article 4(1)"),
-    "postal":       ("Quasi-identifiant — Code postal",                  "RGPD Article 4(1)"),
-    "salaire":      ("Quasi-identifiant — Salaire (donnée financière)",  "RGPD Article 4(1)"),
-    "salary":       ("Quasi-identifiant — Salary",                       "RGPD Article 4(1)"),
-    "income":       ("Quasi-identifiant — Revenus",                      "RGPD Article 4(1)"),
-    "revenue":      ("Quasi-identifiant — Revenu",                       "RGPD Article 4(1)"),
-    "religion":     ("Donnée sensible — Religion",                       "RGPD Article 9"),
-    "ethnicity":    ("Donnée sensible — Ethnie",                         "RGPD Article 9"),
-    "race":         ("Donnée sensible — Origine raciale",                "RGPD Article 9"),
+_MEDIUM_EXACT: dict[str, tuple[str, str]] = {
+    "age":                  ("Quasi-identifiant — Âge",                         "RGPD Article 4(1)"),
+    "genre":                ("Quasi-identifiant — Genre",                       "RGPD Article 4(1)"),
+    "gender":               ("Quasi-identifiant — Gender",                      "RGPD Article 4(1)"),
+    "sexe":                 ("Quasi-identifiant — Sexe",                        "RGPD Article 4(1)"),
+    "sex":                  ("Quasi-identifiant — Sex",                         "RGPD Article 4(1)"),
+    "ville":                ("Quasi-identifiant — Ville",                       "RGPD Article 4(1)"),
+    "city":                 ("Quasi-identifiant — City",                        "RGPD Article 4(1)"),
+    "commune":              ("Quasi-identifiant — Commune",                     "RGPD Article 4(1)"),
+    "municipalite":         ("Quasi-identifiant — Municipalité",                "RGPD Article 4(1)"),
+    "pays":                 ("Quasi-identifiant — Pays",                        "RGPD Article 4(1)"),
+    "country":              ("Quasi-identifiant — Country",                     "RGPD Article 4(1)"),
+    "nation":               ("Quasi-identifiant — Nation",                      "RGPD Article 4(1)"),
+    "nationalite":          ("Quasi-identifiant — Nationalité",                 "RGPD Article 4(1)"),
+    "nationality":          ("Quasi-identifiant — Nationality",                 "RGPD Article 4(1)"),
+    "region":               ("Quasi-identifiant — Région",                      "RGPD Article 4(1)"),
+    "departement":          ("Quasi-identifiant — Département",                 "RGPD Article 4(1)"),
+    "province":             ("Quasi-identifiant — Province",                    "RGPD Article 4(1)"),
+    "code_postal":          ("Quasi-identifiant — Code postal",                 "RGPD Article 4(1)"),
+    "zip":                  ("Quasi-identifiant — ZIP code",                    "RGPD Article 4(1)"),
+    "zipcode":              ("Quasi-identifiant — ZIP code",                    "RGPD Article 4(1)"),
+    "postal_code":          ("Quasi-identifiant — Code postal",                 "RGPD Article 4(1)"),
+    "cp":                   ("Quasi-identifiant — Code postal",                 "RGPD Article 4(1)"),
+    "cedex":                ("Quasi-identifiant — CEDEX",                       "RGPD Article 4(1)"),
+    "salaire":              ("Quasi-identifiant — Salaire",                     "RGPD Article 4(1)"),
+    "salary":               ("Quasi-identifiant — Salary",                      "RGPD Article 4(1)"),
+    "wage":                 ("Quasi-identifiant — Wage",                        "RGPD Article 4(1)"),
+    "remuneration":         ("Quasi-identifiant — Rémunération",                "RGPD Article 4(1)"),
+    "revenus":              ("Quasi-identifiant — Revenus",                     "RGPD Article 4(1)"),
+    "income":               ("Quasi-identifiant — Income",                      "RGPD Article 4(1)"),
+    "earnings":             ("Quasi-identifiant — Earnings",                    "RGPD Article 4(1)"),
+    "revenue_annuel":       ("Quasi-identifiant — Revenu annuel",               "RGPD Article 4(1)"),
+    "religion":             ("Donnée sensible — Religion",                      "RGPD Article 9"),
+    "ethnicity":            ("Donnée sensible — Ethnie",                        "RGPD Article 9"),
+    "race":                 ("Donnée sensible — Origine raciale",               "RGPD Article 9"),
+    "origine":              ("Donnée sensible — Origine",                       "RGPD Article 9"),
+    "ethnie":               ("Donnée sensible — Ethnie",                        "RGPD Article 9"),
+    "handicap":             ("Donnée sensible — Handicap",                      "RGPD Article 9"),
+    "disability":           ("Donnée sensible — Disability",                    "RGPD Article 9"),
+    "opinion_politique":    ("Donnée sensible — Opinion politique",             "RGPD Article 9"),
+    "political_view":       ("Donnée sensible — Political view",                "RGPD Article 9"),
+    "orientation_sexuelle": ("Donnée sensible — Orientation sexuelle",          "RGPD Article 9"),
+    "sexual_orientation":   ("Donnée sensible — Sexual orientation",            "RGPD Article 9"),
+    "sante":                ("Donnée sensible — Santé",                         "RGPD Article 9"),
+    "health":               ("Donnée sensible — Health",                        "RGPD Article 9"),
+    "medical":              ("Donnée sensible — Médical",                       "RGPD Article 9"),
+    "diagnostic":           ("Donnée sensible — Diagnostic médical",            "RGPD Article 9"),
+    "maladie":              ("Donnée sensible — Maladie",                       "RGPD Article 9"),
+    "pathologie":           ("Donnée sensible — Pathologie",                    "RGPD Article 9"),
+    "traitement":           ("Donnée sensible — Traitement médical",            "RGPD Article 9"),
+    "syndicat":             ("Donnée sensible — Appartenance syndicale",        "RGPD Article 9"),
+    "union_membership":     ("Donnée sensible — Union membership",              "RGPD Article 9"),
+    "latitude":             ("Quasi-identifiant — Coordonnée géographique",     "RGPD Article 4(1)"),
+    "longitude":            ("Quasi-identifiant — Coordonnée géographique",     "RGPD Article 4(1)"),
+    "lat":                  ("Quasi-identifiant — Latitude",                    "RGPD Article 4(1)"),
+    "lon":                  ("Quasi-identifiant — Longitude",                   "RGPD Article 4(1)"),
+    "lng":                  ("Quasi-identifiant — Longitude",                   "RGPD Article 4(1)"),
+    "gps":                  ("Quasi-identifiant — Coordonnée GPS",              "RGPD Article 4(1)"),
+    "coordinates":          ("Quasi-identifiant — Coordonnées",                 "RGPD Article 4(1)"),
+    "localisation":         ("Quasi-identifiant — Localisation",                "RGPD Article 4(1)"),
+    "location":             ("Quasi-identifiant — Location",                    "RGPD Article 4(1)"),
+    "geolocation":          ("Quasi-identifiant — Géolocalisation",             "RGPD Article 4(1)"),
+    "position":             ("Quasi-identifiant — Position géographique",       "RGPD Article 4(1)"),
 }
 
+# ── Tier 2 — Pattern match at word boundaries (confidence 0.85) ──────────────
+# Stored as plain tokens; matched against first/last element of col.split("_")
+_HIGH_ENDS:    frozenset[str] = frozenset({"email", "phone", "name", "id", "nom", "prenom", "adresse", "address"})
+_HIGH_STARTS:  frozenset[str] = frozenset({"email", "phone", "tel", "mob", "user"})
+_MEDIUM_ENDS:  frozenset[str] = frozenset({"age", "city", "zip", "lat", "lon", "salary", "income", "gender", "sex"})
+_MEDIUM_STARTS: frozenset[str] = frozenset({"age", "city", "zip", "lat", "lon"})
 
-def _classify_column(col_name: str) -> tuple[str, str, str]:
-    """Classify a single column name into a RGPD risk tier.
+# ── Tier 3 — Semantic: word must be a complete token (confidence 0.65) ────────
+_SEMANTIC_MEDIUM: frozenset[str] = frozenset({
+    "birth", "born", "gender", "sex", "geo",
+    "coord", "location", "salary", "wage", "income",
+})
+
+
+def _normalize_col(col_name: str) -> str:
+    """Lowercase, strip accents, replace spaces/hyphens with underscores."""
+    lower = col_name.lower()
+    nfd = _unicodedata.normalize("NFD", lower)
+    stripped = "".join(c for c in nfd if _unicodedata.category(c) != "Mn")
+    return stripped.replace(" ", "_").replace("-", "_")
+
+
+def _has_word(normalized: str, word: str) -> bool:
+    """Return True only when *word* is a complete underscore-delimited token."""
+    return word in normalized.split("_")
+
+
+def _classify_column(col_name: str) -> tuple[str, float, str, str, str]:
+    """3-tier RGPD classifier — no substring false-positives.
 
     Returns:
-        (risk_level, reason, article) — risk_level is 'high', 'medium', or 'safe'.
+        (risk_level, confidence, reason, article, match_tier)
+        risk_level : 'high' | 'medium' | 'safe'
+        confidence : 1.0 (exact) | 0.85 (pattern) | 0.65 (semantic) | 0.0 (safe)
+        match_tier : 'exact' | 'pattern' | 'semantic' | 'none'
+
+    Tiers:
+        1. Exact  — full normalised name is in the exact-match dict (no false positives)
+        2. Pattern — first or last token matches a boundary-anchored keyword
+        3. Semantic — any token matches a semantic keyword (medium-risk only)
     """
-    lower = col_name.lower().replace(" ", "_")
-    for kw, reason in _RGPD_HIGH.items():
-        if kw in lower:
-            return "high", reason, "RGPD Article 4(1)"
-    for kw, (reason, article) in _RGPD_MEDIUM.items():
-        if kw in lower:
-            return "medium", reason, article
-    return "safe", "Donnée statistique — Faible risque", ""
+    norm = _normalize_col(col_name)
+    parts = norm.split("_")
+
+    # ── Tier 1: exact match ──────────────────────────────────────────────────
+    if norm in _HIGH_EXACT:
+        return "high", 1.0, _HIGH_EXACT[norm], "RGPD Article 4(1)", "exact"
+    if norm in _MEDIUM_EXACT:
+        reason, article = _MEDIUM_EXACT[norm]
+        return "medium", 1.0, reason, article, "exact"
+
+    # ── Tier 2: boundary-anchored pattern ────────────────────────────────────
+    last = parts[-1] if parts else ""
+    first = parts[0] if parts else ""
+
+    if last in _HIGH_ENDS:
+        return (
+            "high", 0.85,
+            f"Identifiant personnel — colonne se terminant par '{last}'",
+            "RGPD Article 4(1)", "pattern",
+        )
+    if first in _HIGH_STARTS:
+        return (
+            "high", 0.85,
+            f"Identifiant personnel — colonne commençant par '{first}'",
+            "RGPD Article 4(1)", "pattern",
+        )
+    if last in _MEDIUM_ENDS:
+        return (
+            "medium", 0.85,
+            f"Quasi-identifiant — colonne se terminant par '{last}'",
+            "RGPD Article 4(1)", "pattern",
+        )
+    if first in _MEDIUM_STARTS:
+        return (
+            "medium", 0.85,
+            f"Quasi-identifiant — colonne commençant par '{first}'",
+            "RGPD Article 4(1)", "pattern",
+        )
+
+    # ── Tier 3: semantic token check (medium only) ───────────────────────────
+    for word in _SEMANTIC_MEDIUM:
+        if _has_word(norm, word):
+            return (
+                "medium", 0.65,
+                f"Quasi-identifiant probable — contient le terme '{word}'",
+                "RGPD Article 4(1)", "semantic",
+            )
+
+    return "safe", 0.0, "Donnée statistique — Faible risque", "", "none"
 
 
 class RgpdScanRequest(BaseModel):
@@ -736,15 +904,15 @@ async def rgpd_scan(
     has_medium = False
 
     for col in columns:
-        risk, reason, article = _classify_column(col)
+        risk, confidence, reason, article, match_tier = _classify_column(col)
         if risk == "high":
             has_high = True
             risk_column_names.append(col)
-            column_results.append({"name": col, "risk": "high", "reason": reason, "article": article})
+            column_results.append({"name": col, "risk": "high", "reason": reason, "article": article, "confidence": confidence, "match_tier": match_tier})
         elif risk == "medium":
             has_medium = True
             risk_column_names.append(col)
-            column_results.append({"name": col, "risk": "medium", "reason": reason, "article": article})
+            column_results.append({"name": col, "risk": "medium", "reason": reason, "article": article, "confidence": confidence, "match_tier": match_tier})
         else:
             safe_columns.append(col)
 

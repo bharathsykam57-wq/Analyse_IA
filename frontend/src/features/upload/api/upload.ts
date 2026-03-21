@@ -48,6 +48,8 @@ export interface RgpdColumnResult {
   risk: "high" | "medium" | "safe";
   reason: string;
   article: string;
+  confidence?: number;
+  match_tier?: string;
 }
 
 export interface RgpdScanResult {
