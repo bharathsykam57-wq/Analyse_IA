@@ -259,7 +259,7 @@ def search_similar(query_embedding: list[float], top_k: int = 5, source_filter: 
             {
                 "id": row[0],
                 "source": row[1],
-                "page_number": row[2],
+                "page": row[2],         # normalized from DB column "page_number" to "page"
                 "chunk_index": row[3],
                 "content": row[4],
                 "similarity": round(float(row[5]), 4)

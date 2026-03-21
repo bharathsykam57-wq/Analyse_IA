@@ -418,10 +418,13 @@ async def upload_pdf(
     # Non-fatal: a failed enqueue does not fail the upload response.
     try:
         from backend.api.celery.tasks import index_document  # lazy to avoid circular import
-        index_document.apply_async(args=[filename, str(current_user.id)])
-        logger.info(f"RAG indexing task enqueued for: {filename}")
+        index_document.apply_async(
+            kwargs={"file_id": filename, "user_id": str(current_user.id)},
+            queue="rag",
+        )
+        logger.info(f"PDF indexing task dispatched for: {filename}")
     except Exception as _idx_err:
-        logger.warning(f"Failed to enqueue RAG indexing for {filename}: {_idx_err}")
+        logger.warning(f"Failed to dispatch indexing task: {_idx_err}")
 
     return {
         "file_id": filename,  # full "{uuid}_{sanitized_name}" matches list_files and Supabase path
