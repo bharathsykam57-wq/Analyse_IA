@@ -465,7 +465,7 @@ def run_eda(dataset_result: dict) -> dict:
     except Exception as e:
         # Catch all exceptions and return as error (true to error-handling philosophy)
         error_msg = f"EDA failed: {str(e)}"
-        logger.error(error_msg)
+        logger.error(error_msg, exc_info=True)
         print(f"[eda_engine] ✗ ERROR: {error_msg}")
         result['error'] = error_msg
         return result

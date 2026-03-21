@@ -340,13 +340,16 @@ export default function AgentChatPage() {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full pt-6">
-               {(files.length > 0 
-                  ? [
-                     `Lance l'AutoML sur ${files.find(f => f.file_id === activeFileId)?.filename || 'vos données'}`, 
-                     `Quelles sont les anomalies dans ${files.find(f => f.file_id === activeFileId)?.filename || 'ce fichier'} ?`, 
-                     "Génère le dashboard complet de mon jeu de données",
-                     "Fais une synthèse de l'historique de cette analyse"
-                    ]
+               {(files.length > 0
+                  ? (() => {
+                      const activeFileName = getCleanFilename(files.find(f => f.file_id === activeFileId)?.filename ?? '');
+                      return [
+                        `Lance l'AutoML sur ${activeFileName || 'vos données'}`,
+                        `Quelles sont les anomalies dans ${activeFileName || 'ce fichier'} ?`,
+                        "Génère le dashboard complet de mon jeu de données",
+                        "Fais une synthèse de l'historique de cette analyse"
+                      ];
+                    })()
                   : [
                      "Expliquez-moi comment importer des données",
                      "Quels types de fichiers sont supportés ?",

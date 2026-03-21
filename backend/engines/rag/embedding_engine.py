@@ -2,6 +2,11 @@
 
 This implementation removes external Ollama API dependency and computes embeddings
 locally using Hugging Face sentence-transformers.
+
+IMPORTANT — Embedding dimension must match the pgvector column definition (vector(384)).
+Default model: all-MiniLM-L6-v2 → 384-dim, ~90 MB, fast download on Railway.
+Do NOT change to paraphrase-multilingual-mpnet-base-v2 (768-dim) without also
+running the corresponding Alembic migration to alter the DB column.
 """
 
 from __future__ import annotations
@@ -10,10 +15,23 @@ import logging
 import os
 from typing import Optional
 
+# ── HuggingFace cache directory ───────────────────────────────────────────────
+# On Railway / Docker, the default ~/.cache/huggingface may not be writable.
+# Read HF_HOME from env (set it in Railway settings for a persistent volume),
+# falling back to /tmp/huggingface so the model can at least be downloaded.
+_hf_home = os.getenv("HF_HOME", os.getenv("TRANSFORMERS_CACHE", "/tmp/huggingface"))
+os.makedirs(_hf_home, exist_ok=True)
+os.environ.setdefault("HF_HOME", _hf_home)
+os.environ.setdefault("TRANSFORMERS_CACHE", _hf_home)
+# ─────────────────────────────────────────────────────────────────────────────
+
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
+# all-MiniLM-L6-v2: 384-dim, ~90 MB, fast download on Railway cold starts.
+# Must stay 384-dim to match the pgvector column definition (vector(384)).
+# Override via EMBED_MODEL env var — but run the Alembic migration if you change dimension.
 EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
 
@@ -23,8 +41,9 @@ _model: SentenceTransformer | None = None
 def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        logger.info(f"Loading embedding model: {EMBED_MODEL}")
+        logger.info(f"Loading embedding model: {EMBED_MODEL} (first request — may download ~90 MB)")
         _model = SentenceTransformer(EMBED_MODEL)
+        logger.info(f"✓ Embedding model loaded successfully: {EMBED_MODEL}")
     return _model
 
 

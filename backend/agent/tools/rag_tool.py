@@ -328,7 +328,14 @@ def index_pdf(pdf_path: str) -> dict:
     # - Errors: Ollama offline, GPU out of memory, connection timeout
     embedded = embed_chunks(chunks)
     if not embedded:
-        return {"success": False, "error": "Échec de l'embedding des chunks"}
+        return {
+            "success": False,
+            "error": (
+                f"Échec de l'embedding des chunks ({len(chunks)} chunks extraits). "
+                "Vérifiez que le modèle sentence-transformers est disponible "
+                f"(EMBED_MODEL={os.getenv('EMBED_MODEL', 'default')})."
+            )
+        }
 
     # STAGE 3: STORE IN PGVECTOR
     # - INSERT chunks with ON CONFLICT DO NOTHING (UPSERT)

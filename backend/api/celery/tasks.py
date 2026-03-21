@@ -1075,6 +1075,8 @@ def run_rag(self, query: str, file_path: str, session_id: str, language: str = "
     base=LoggedTask,
     name="backend.api.celery.tasks.index_document",
     queue="rag",
+    soft_time_limit=120,
+    time_limit=150,
 )
 def index_document(self, file_id: str, user_id: str):
     """Download PDF from Supabase Storage and index it into pgvector for RAG queries.
@@ -1144,6 +1146,14 @@ def index_document(self, file_id: str, user_id: str):
         return result
 
     except Exception as e:
+        from celery.exceptions import SoftTimeLimitExceeded
+        if isinstance(e, SoftTimeLimitExceeded):
+            logger.error(
+                f"✗ index_document timed out after 120s for file_id={file_id!r}. "
+                "Likely cause: embedding model downloading on first run. "
+                "Call warm_embedding_model task on worker startup to pre-download."
+            )
+            return {"success": False, "error": "Embedding timed out (120s). Model may still be downloading."}
         logger.error(f"index_document task failed: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=10, max_retries=1)
 
@@ -1155,3 +1165,47 @@ def index_document(self, file_id: str, user_id: str):
                 logger.debug(f"Cleaned up tmp file: {tmp_path}")
             except Exception as _cleanup_err:
                 logger.warning(f"Failed to clean up {tmp_path}: {_cleanup_err}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Embedding Model Pre-warming Task
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@celery_app.task(
+    name="backend.api.celery.tasks.warm_embedding_model",
+    queue="rag",
+)
+def warm_embedding_model():
+    """Pre-download and cache the sentence-transformers embedding model.
+
+    Call this on RAG worker startup so the model weights are cached in
+    /tmp/huggingface before any PDF upload arrives. Without pre-warming, the
+    first index_document task downloads ~90 MB inline and may hit the 120s
+    soft time limit.
+
+    Invocation (e.g. in Railway start command or worker init signal):
+        from backend.api.celery.tasks import warm_embedding_model
+        warm_embedding_model.apply_async(queue="rag")
+
+    Also verifies that the DB embedding column dimension matches the model.
+    Logs a clear error if a migration is needed.
+    """
+    from backend.engines.rag.embedding_engine import _get_model, EMBED_MODEL
+    from backend.engines.rag.vector_store import check_embedding_dimension
+
+    logger.info(f"warm_embedding_model: loading {EMBED_MODEL} ...")
+    try:
+        model = _get_model()
+        # Encode a dummy sentence to confirm weights loaded end-to-end
+        test_vec = model.encode("test", convert_to_numpy=True, normalize_embeddings=True)
+        logger.info(
+            f"✓ warm_embedding_model: model ready, output dim={len(test_vec)}, model={EMBED_MODEL}"
+        )
+    except Exception as e:
+        logger.error(f"✗ warm_embedding_model: model load failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+    # Verify DB column dimension matches model output
+    check_embedding_dimension(expected_dim=len(test_vec))
+
+    return {"success": True, "model": EMBED_MODEL, "dim": int(len(test_vec))}

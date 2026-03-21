@@ -236,7 +236,14 @@ def generate_shap_explanation(
     X_transformed = preprocessor.transform(X_eval)
     feature_names = preprocessor.get_feature_names_out().tolist()
 
-    explainer = shap.TreeExplainer(estimator)
+    model_type = type(estimator).__name__.lower()
+    tree_keywords = ["forest", "boosting", "lgbm", "xgb", "tree"]
+    if any(kw in model_type for kw in tree_keywords):
+        explainer = shap.TreeExplainer(estimator)
+    else:
+        explainer = shap.LinearExplainer(
+            estimator, shap.maskers.Independent(X_transformed)
+        )
     shap_values = explainer.shap_values(X_transformed)
 
     if isinstance(shap_values, list):

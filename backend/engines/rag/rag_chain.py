@@ -331,7 +331,7 @@ def ask(question: str, top_k: int = TOP_K, source_filter: str | None = None) -> 
     # This vector will be used to find semantically similar chunks in database
     query_embedding = embed_text(query_for_embedding)
     if query_embedding is None:
-        logger.error("✗ Embedding failed (Ollama unavailable?)")
+        logger.error("✗ Embedding failed (sentence-transformers model error?)")
         return {"success": False, "error": "Failed to embed question"}
 
     # STAGE 2: RETRIEVAL — Search for top-K most similar chunks

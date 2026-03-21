@@ -4,7 +4,7 @@ Provides semantic vector storage and retrieval for Analyse_IA RAG pipeline.
 Manages dense vector embeddings for document chunks with efficient similarity search.
 
 Architecture:
-- Storage: PostgreSQL with pgvector extension (768-dim vectors)
+- Storage: PostgreSQL with pgvector extension (384-dim vectors, all-MiniLM-L6-v2)
 - Index: Similarity search using operators (<=> cosine distance, <#> L2 distance)
 - Deduplication: UPSERT logic prevents storing duplicate chunks
 - Scalability: Batch inserts, configurable connection pooling
@@ -91,6 +91,57 @@ def get_connection():
         return None
 
 
+def check_embedding_dimension(expected_dim: int = 384) -> bool:
+    """Check that the documents.embedding column matches the expected vector dimension.
+
+    Called on worker startup (via warm_embedding_model task) to catch model/schema
+    mismatches early. Returns True if the column dimension is correct, False otherwise.
+
+    A mismatch means the Alembic migration has not been applied yet — run:
+        alembic upgrade head
+
+    Args:
+        expected_dim: Expected vector dimension (384 for all-MiniLM-L6-v2).
+
+    Returns:
+        True if dimension matches or table does not exist yet. False on mismatch.
+    """
+    conn = get_connection()
+    if not conn:
+        logger.warning("⚠ check_embedding_dimension: cannot connect to DB")
+        return True  # Optimistic: don't block startup on connection failure
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT atttypmod
+                FROM pg_attribute
+                JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
+                WHERE pg_class.relname = 'documents'
+                  AND pg_attribute.attname = 'embedding'
+                  AND pg_attribute.attnum > 0
+            """)
+            row = cur.fetchone()
+            if row is None:
+                logger.info("check_embedding_dimension: documents table or column not found yet")
+                return True  # Table not created yet — migration pending, not a mismatch
+            actual_dim = row[0]  # atttypmod stores the dimension for vector columns
+            if actual_dim != expected_dim:
+                logger.error(
+                    f"✗ Embedding dimension mismatch: DB has vector({actual_dim}), "
+                    f"model produces {expected_dim}-dim vectors. "
+                    f"Run: alembic upgrade head"
+                )
+                return False
+            logger.info(f"✓ Embedding dimension OK: vector({actual_dim})")
+            return True
+    except Exception as e:
+        logger.error(f"✗ check_embedding_dimension failed: {e}", exc_info=True)
+        return True  # Optimistic on unexpected errors
+    finally:
+        conn.close()
+
+
 def store_chunks(embedded_chunks: list[dict]) -> dict:
     """Batch insert embedded chunks into vector store with deduplication.
 
@@ -151,6 +202,7 @@ def store_chunks(embedded_chunks: list[dict]) -> dict:
 
     inserted = 0
     skipped = 0
+    failed = 0
 
     try:
         with conn:  # Atomic transaction
@@ -177,16 +229,22 @@ def store_chunks(embedded_chunks: list[dict]) -> dict:
                             skipped += 1
 
                     except Exception as e:
-                        logger.warning(f"  → Chunk {chunk.get('chunk_id', '?')}: Insert failed ({str(e)})")
-                        skipped += 1
+                        logger.error(
+                            f"  → Chunk {chunk.get('chunk_id', '?')}: Insert failed ({str(e)})",
+                            exc_info=True,
+                        )
+                        failed += 1
                         continue
 
-        logger.info(f"✓ Store complete: {inserted} inserted, {skipped} skipped (duplicates)")
+        logger.info(
+            f"✓ Store complete: {inserted} inserted, {skipped} skipped (duplicates), {failed} failed"
+        )
 
         return {
             "success": True,
             "inserted": inserted,
             "skipped": skipped,
+            "failed": failed,
             "error": None
         }
 
