@@ -22,10 +22,16 @@ export default function LoginPage() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
   });
+
+  const fillDemo = () => {
+    setValue("email", "demo@analyse-ia.fr");
+    setValue("password", "Demo1234!");
+  };
 
   const onSubmit = async (data: LoginFormValues) => {
     setServerError(null);
@@ -134,6 +140,14 @@ export default function LoginPage() {
                 "Se connecter"
               )}
             </Button>
+
+            <button
+              type="button"
+              onClick={fillDemo}
+              className="w-full mt-2 px-4 py-2 rounded-md border border-white/10 bg-transparent text-sm text-gray-400 hover:text-white hover:border-white/30 hover:bg-white/5 transition-all"
+            >
+              Accès Démo
+            </button>
           </form>
         </CardContent>
 

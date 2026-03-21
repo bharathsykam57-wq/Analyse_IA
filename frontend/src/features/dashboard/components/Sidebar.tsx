@@ -2,17 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  LayoutDashboard, 
-  UploadCloud, 
-  History, 
-  Shield, 
-  Settings, 
-  LogOut, 
+import {
+  LayoutDashboard,
+  UploadCloud,
+  History,
+  Shield,
+  Settings,
+  LogOut,
   Download,
   BookOpen,
   User,
-  ChevronDown
+  ChevronDown,
+  Globe
 } from "lucide-react";
 import { cn } from "@/shared/lib/utils";
 import { useAuthStore } from "@/features/auth/store/authStore";
@@ -40,7 +41,7 @@ interface NavSection {
 export function Sidebar({ className, onLinkClick }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const { language } = useChatStore();
+  const { language, setLanguage } = useChatStore();
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["main", "tools"])
   );
@@ -130,25 +131,25 @@ export function Sidebar({ className, onLinkClick }: SidebarProps) {
   return (
     <div className={cn("flex flex-col h-full bg-[rgba(15,31,61,0.8)] backdrop-blur-xl border-r border-border text-gray-300 transition-all", className)}>
       {/* Logo */}
-      <div className="p-6">
+      <div className="p-4">
         <Link href="/dashboard" className="flex items-center gap-2 group cursor-pointer hover:opacity-90 transition-opacity">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center group-hover:scale-105 transition-transform shadow-lg shadow-blue-900/40">
-            <Shield className="w-5 h-5 text-white" />
+          <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center group-hover:scale-105 transition-transform shadow-lg shadow-blue-900/40">
+            <Shield className="w-4 h-4 text-white" />
           </div>
-          <h1 className="text-xl font-bold font-sans text-white tracking-tight">
+          <h1 className="text-lg font-bold font-sans text-white tracking-tight">
             Analyse <span className="text-blue-500">IA</span>
           </h1>
         </Link>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-4 space-y-3 mt-4 overflow-y-auto">
+      <nav className="flex-1 px-3 space-y-2 mt-3 overflow-y-auto">
         {navSections.map((section) => (
           <div key={section.label}>
             {/* Section Header */}
             <button
               onClick={() => toggleSection(section.label)}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-500 hover:text-gray-300 uppercase tracking-wider transition-colors"
+              className="w-full flex items-center justify-between px-2 py-1.5 text-[10px] font-semibold text-gray-500 hover:text-gray-300 uppercase tracking-wider transition-colors"
             >
               <span>
                 {section.label === "main" 
@@ -185,17 +186,17 @@ export function Sidebar({ className, onLinkClick }: SidebarProps) {
                         href={item.href}
                         onClick={onLinkClick}
                         className={cn(
-                          "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 group",
+                          "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 group",
                           active
                             ? "bg-blue-600/15 text-blue-400 font-semibold shadow-[inset_4px_0_0_0_#2563EB]"
                             : "hover:bg-blue-600/10 hover:text-white"
                         )}
                       >
-                        <item.icon 
+                        <item.icon
                           className={cn(
-                            "w-5 h-5 transition-transform group-hover:scale-110",
+                            "w-4 h-4 flex-shrink-0 transition-transform group-hover:scale-110",
                             active ? "text-blue-500" : "text-gray-400"
-                          )} 
+                          )}
                         />
                         <span className="flex-1">{item.label}</span>
                         {item.badge && (
@@ -214,13 +215,22 @@ export function Sidebar({ className, onLinkClick }: SidebarProps) {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 mt-auto border-t border-border bg-[#0A1628]/50 pb-24">
-        <div className="flex items-center justify-between gap-3 px-1">
-          <Link 
+      <div className="p-3 mt-auto border-t border-border bg-[#0A1628]/50 pb-4 space-y-2">
+        {/* Language toggle — desktop only (FIX 1) */}
+        <button
+          onClick={() => setLanguage(language === 'fr' ? 'en' : 'fr')}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+        >
+          <Globe className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+          {language === 'fr' ? "Switch to English" : "Passer en Français"}
+        </button>
+
+        <div className="flex items-center justify-between gap-2">
+          <Link
             href="/account"
-            className="flex items-center gap-3 min-w-0 flex-1 hover:bg-white/5 p-2 rounded-xl transition-all group"
+            className="flex items-center gap-2 min-w-0 flex-1 hover:bg-white/5 p-1.5 rounded-xl transition-all group"
           >
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-900/40 ring-2 ring-white/5 group-hover:ring-blue-500/50 transition-all ml-1 flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-lg shadow-blue-900/40 ring-2 ring-white/5 group-hover:ring-blue-500/50 transition-all flex-shrink-0">
               {user?.email?.[0].toUpperCase() || "U"}
             </div>
             <div className="min-w-0">
@@ -233,12 +243,12 @@ export function Sidebar({ className, onLinkClick }: SidebarProps) {
             </div>
           </Link>
 
-          <button 
+          <button
             onClick={logout}
-            className="p-2.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all flex-shrink-0 mr-1"
+            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all flex-shrink-0"
             title={isFrench ? "Déconnexion" : "Logout"}
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>

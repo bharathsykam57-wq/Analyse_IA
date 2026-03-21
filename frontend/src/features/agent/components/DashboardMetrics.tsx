@@ -4,6 +4,27 @@ import { Activity, Database, AlertTriangle, TrendingUp, BarChart4 } from "lucide
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/shared/lib/utils";
 
+const MODEL_SPECIAL_CASES: Record<string, string> = {
+  lightgbm: "LightGBM",
+  lgbm: "LightGBM",
+  xgboost: "XGBoost",
+  xgb: "XGBoost",
+  svm: "SVM",
+  knn: "KNN",
+  mlp: "MLP",
+};
+
+function formatModelName(name: string): string {
+  if (!name || name === "N/A") return name;
+  const lower = name.toLowerCase().replace(/_/g, "");
+  if (MODEL_SPECIAL_CASES[lower]) return MODEL_SPECIAL_CASES[lower];
+  return name
+    .replace(/_/g, " ")
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 interface DashboardMetricsProps {
   data: AnalysisResult;
   className?: string;
@@ -88,7 +109,7 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Modèle Optimal"
-          value={best_model}
+          value={formatModelName(best_model)}
           subtitle={
             tuningApplied
               ? `Tuning appliqué${baseModelName ? ` (base: ${baseModelName})` : ""}`
@@ -152,22 +173,26 @@ export function DashboardMetrics({ data, className }: DashboardMetricsProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-4 space-y-4">
-            {(top_features || []).map((feature, i) => (
-              <div key={i} className="space-y-2 group/item cursor-crosshair">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-200 font-medium group-hover/item:text-blue-300 transition-colors">{feature.name}</span>
-                  <span className="text-blue-400 font-mono group-hover/item:font-bold group-hover/item:text-blue-300 transition-all">{feature.importance_percentage}%</span>
-                </div>
-                <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full relative group-hover/item:brightness-125 transition-all duration-1000 ease-out" 
-                    style={{ width: `${feature.importance_percentage}%` }}
-                  >
-                    <div className="absolute top-0 right-0 w-4 h-full bg-white/30 blur-sm mix-blend-overlay animate-pulse" />
+            {(top_features || []).map((feature, i) => {
+              const featureName = feature.feature ?? feature.name ?? "—";
+              const pct = typeof feature.importance === "number"
+                ? parseFloat((feature.importance * 100).toFixed(1))
+                : (feature.importance_percentage ?? 0);
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-32 text-xs text-gray-400 truncate flex-shrink-0" title={featureName}>
+                    {featureName}
+                  </span>
+                  <div className="flex-1 bg-white/10 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-500 h-2 rounded-full transition-all duration-700"
+                      style={{ width: `${pct}%` }}
+                    />
                   </div>
+                  <span className="w-10 text-xs text-gray-400 text-right flex-shrink-0">{pct}%</span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
 

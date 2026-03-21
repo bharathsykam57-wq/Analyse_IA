@@ -11,6 +11,30 @@ import { cn } from "@/shared/lib/utils";
 import { fetchFiles, UploadedFile } from "@/features/upload/api/upload";
 import { useRouter } from "next/navigation";
 
+const UUID_PREFIX_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/gi;
+
+function getCleanFilename(text: string): string {
+  return text.replace(UUID_PREFIX_RE, "");
+}
+
+function renderMarkdown(text: string) {
+  return text
+    .split('\n')
+    .map((line, i) => {
+      const parts = line.split('**');
+      return (
+        <span key={i}>
+          {parts.map((part, j) =>
+            j % 2 === 1
+              ? <strong key={j} className="text-white font-semibold">{part}</strong>
+              : <span key={j}>{part}</span>
+          )}
+          <br />
+        </span>
+      );
+    });
+}
+
 export default function AgentChatPage() {
   const router = useRouter();
   const { messages, addMessage, isProcessing, setIsProcessing, currentTaskId, removeLoading, clearMessages } = useChatStore();
@@ -139,26 +163,24 @@ export default function AgentChatPage() {
       <div className="absolute right-0 bottom-0 w-[600px] h-[600px] bg-indigo-600/10 rounded-full blur-[120px] pointer-events-none" />
 
       {/* Header */}
-      <div className="sticky top-0 p-6 border-b border-white/5 bg-[#050A15]/80 backdrop-blur-xl z-30 shadow-sm flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3 tracking-tight">
-            <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20 shadow-inner">
-              <Sparkles className="w-5 h-5 text-blue-400" />
-            </div>
-            Assistant Analyste <span className="text-blue-500 font-black">PRO</span>
+      <div className="sticky top-0 p-3 border-b border-white/5 bg-[#050A15]/80 backdrop-blur-xl z-30 shadow-sm flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 bg-blue-500/10 rounded-lg border border-blue-500/20 shadow-inner flex-shrink-0">
+            <Sparkles className="w-4 h-4 text-blue-400" />
+          </div>
+          <h1 className="text-xl font-bold text-white tracking-tight whitespace-nowrap">
+            Assistant Analyste <span className="text-blue-500 font-black text-sm">PRO</span>
           </h1>
-          <p className="text-gray-400 text-sm mt-2 ml-12 hidden md:block">
-            Agent conversationnel propulsé par RAG et AutoML pour vos prises de décision.
-          </p>
+          <span className="text-gray-500 text-xs hidden lg:inline truncate">— RAG &amp; AutoML</span>
         </div>
-        
+
         {messages.length > 0 && (
-          <Button 
+          <Button
             onClick={clearMessages}
             variant="outline"
-            className="border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-gray-200 gap-2 font-medium"
+            className="border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-gray-200 gap-2 font-medium flex-shrink-0 text-sm py-1.5 h-auto"
           >
-            <RefreshCcw className="w-4 h-4 text-blue-400" />
+            <RefreshCcw className="w-3.5 h-3.5 text-blue-400" />
             Nouvelle analyse
           </Button>
         )}
@@ -203,7 +225,7 @@ export default function AgentChatPage() {
                    >
                      {files.map(f => (
                        <option key={f.file_id} value={f.file_id} className="bg-[#050A15] p-2">
-                         {f.filename.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '')}
+                         {getCleanFilename(f.filename)}
                        </option>
                      ))}
                    </select>
@@ -286,7 +308,9 @@ export default function AgentChatPage() {
                          <span className="animate-pulse">{msg.content}</span>
                        </div>
                     ) : (
-                      <p>{msg.content}</p>
+                      <div className="text-[15px] leading-relaxed">
+                        {renderMarkdown(getCleanFilename(msg.content))}
+                      </div>
                     )}
                   </div>
                   
