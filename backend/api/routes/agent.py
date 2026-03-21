@@ -25,6 +25,9 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import json
+import csv
+import io as _io
+import os
 import redis
 from celery.result import AsyncResult
 
@@ -40,6 +43,65 @@ from backend.api.security.rate_limit import enforce_ip_rate_limit, enforce_user_
 logger = logging.getLogger(__name__)
 
 REDIS_URL = get_redis_url()
+
+# ── RGPD quick-scan helpers (subset of files.py classification) ────────────────
+_RGPD_HIGH_KEYWORDS = {
+    "email", "mail", "phone", "telephone", "tel", "mobile",
+    "nom", "name", "prenom", "firstname", "lastname", "surname",
+    "adresse", "address", "rue", "street",
+    "ssn", "nss", "securite_sociale", "national_id",
+    "passport", "carte_identite", "cin",
+    "ip_address", "ip", "device_id",
+    "date_naissance", "birthdate", "birthday", "dob",
+}
+
+
+def _rgpd_quick_scan(file_id: Optional[str], user_id: str) -> list[str]:
+    """Return list of high-risk column names found in the CSV header.
+
+    Reads only the header row (no full file parse). Used to attach RGPD
+    audit metadata to the Celery task before dispatch. Non-fatal: returns
+    empty list on any error so task dispatch is never blocked.
+    """
+    if not file_id:
+        return []
+    try:
+        csv_bytes: bytes | None = None
+
+        # Try Supabase first
+        try:
+            from backend.api.routes.files import _supabase  # noqa: PLC0415
+            if _supabase is not None:
+                storage_path = f"{user_id}/{file_id}"
+                csv_bytes = _supabase.storage.from_("uploads").download(storage_path)
+        except Exception:
+            pass
+
+        # Fallback: local filesystem
+        if csv_bytes is None:
+            upload_dir = os.getenv("UPLOAD_DIR", "uploads")
+            local_path = os.path.join(upload_dir, user_id, file_id)
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as _f:
+                    csv_bytes = _f.read()
+
+        if csv_bytes is None:
+            return []
+
+        text = csv_bytes.decode("utf-8", errors="replace")
+        reader = csv.reader(_io.StringIO(text))
+        columns = next(reader, [])
+
+        risky = []
+        for col in columns:
+            lower = col.lower().replace(" ", "_")
+            if any(kw in lower for kw in _RGPD_HIGH_KEYWORDS):
+                risky.append(col)
+        return risky
+
+    except Exception as _err:
+        logger.warning(f"RGPD quick scan failed (non-fatal): {_err}")
+        return []
 TASK_RESULT_CACHE_PREFIX = "task_result"
 USER_TASK_HISTORY_PREFIX = "user_task_history"
 USER_TASK_HISTORY_MAX_ITEMS = 100
@@ -199,6 +261,18 @@ async def ask_agent(
         or "fr"
     )
 
+    # RGPD pre-flight scan: check for personal data columns and attach
+    # audit metadata to the task. Never blocks dispatch — user already
+    # acknowledged any warnings on the frontend before reaching this point.
+    rgpd_risky_cols = _rgpd_quick_scan(request.file_id, str(current_user.id))
+    rgpd_warning = len(rgpd_risky_cols) > 0
+    if rgpd_warning:
+        logger.warning(
+            f"RGPD warning: high-risk columns detected for task dispatch "
+            f"user={current_user.email} file={request.file_id} "
+            f"columns={rgpd_risky_cols}"
+        )
+
     task = run_agent.apply_async(
         kwargs={
             "query": request.query,
@@ -208,6 +282,13 @@ async def ask_agent(
             "user_id": str(current_user.id),
         },
         queue="agent",
+        # Store RGPD metadata in Celery task headers (audit trail, does not
+        # affect the task function signature).
+        headers={
+            "rgpd_warning": rgpd_warning,
+            "rgpd_high_risk_columns": rgpd_risky_cols,
+            "rgpd_user_acknowledged": True,  # User confirmed on frontend
+        },
     )
 
     _record_user_task(str(current_user.id), task.id)

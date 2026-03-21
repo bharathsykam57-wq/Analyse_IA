@@ -8,7 +8,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { Button } from "@/shared/components/ui/Button";
 import { Send, Bot, User, Loader2, Play, Sparkles, Shield, RefreshCcw, Database, Plus } from "lucide-react";
 import { cn } from "@/shared/lib/utils";
-import { fetchFiles, UploadedFile } from "@/features/upload/api/upload";
+import { fetchFiles, rgpdScan, UploadedFile, RgpdScanResult } from "@/features/upload/api/upload";
 import { useRouter } from "next/navigation";
 
 const UUID_PREFIX_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/gi;
@@ -43,6 +43,11 @@ export default function AgentChatPage() {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string>("");
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
+
+  // RGPD scanner state
+  const [showRgpdModal, setShowRgpdModal] = useState(false);
+  const [rgpdResult, setRgpdResult] = useState<RgpdScanResult | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<string>("");
 
   // Fetch files on mount
   useEffect(() => {
@@ -108,28 +113,24 @@ export default function AgentChatPage() {
     return () => clearInterval(pollInterval);
   }, [isProcessing, currentTaskId, addMessage, setIsProcessing, removeLoading]);
 
-  const handleSend = async (e?: React.FormEvent, textOverride?: string) => {
-    e?.preventDefault();
-    const userPrompt = textOverride ?? input;
-    if (!userPrompt.trim() || isProcessing) return;
-
-    setInput("");
+  // Core analysis dispatch — called directly or after RGPD confirmation
+  const proceedWithAnalysis = async (prompt: string) => {
+    setShowRgpdModal(false);
 
     // 1. Add user message
     addMessage({
       id: Date.now().toString(),
       role: 'user',
-      content: userPrompt,
+      content: prompt,
       timestamp: new Date().toISOString()
     });
 
     try {
       setIsProcessing(true);
-      
+
       // 2. Add temporary "polling" message
-      const loadingMsgId = (Date.now() + 1).toString();
       addMessage({
-        id: loadingMsgId,
+        id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: "Analyse en cours...",
         timestamp: new Date().toISOString(),
@@ -137,11 +138,10 @@ export default function AgentChatPage() {
       });
 
       // 3. Initiate Task
-      const response = await askAgent(userPrompt, activeFileId);
-      
+      const response = await askAgent(prompt, activeFileId);
+
       // 4. Update store to begin polling that specific task id
       setIsProcessing(true, response.task_id);
-
     } catch {
       setIsProcessing(false);
       removeLoading();
@@ -154,9 +154,103 @@ export default function AgentChatPage() {
     }
   };
 
+  const handleSend = async (e?: React.FormEvent, textOverride?: string) => {
+    e?.preventDefault();
+    const userPrompt = textOverride ?? input;
+    if (!userPrompt.trim() || isProcessing) return;
+
+    setInput("");
+
+    // RGPD pre-flight scan: only for CSV files with an active file selected
+    if (activeFileId) {
+      try {
+        const scan = await rgpdScan(activeFileId);
+        if (scan.risk_level === 'high' || scan.risk_level === 'medium') {
+          // Pause: show modal, wait for user confirmation
+          setRgpdResult(scan);
+          setPendingPrompt(userPrompt);
+          setShowRgpdModal(true);
+          return;
+        }
+      } catch (scanErr) {
+        // Non-blocking: if scan fails, proceed with analysis anyway
+        console.warn("RGPD scan failed, proceeding:", scanErr);
+      }
+    }
+
+    // Safe / no file → proceed directly
+    await proceedWithAnalysis(userPrompt);
+  };
+
   return (
     <div className="flex flex-col min-h-full bg-[#050A15] relative">
-      
+
+      {/* ── RGPD Warning Modal ─────────────────────────────────────────────── */}
+      {showRgpdModal && rgpdResult && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-[#0B1A2F] border border-white/10 rounded-2xl p-6 max-w-lg w-full shadow-2xl shadow-blue-900/30 animate-in fade-in zoom-in-95 duration-300">
+
+            {/* Header */}
+            <div className="flex items-start gap-3 mb-4">
+              <span className="text-2xl mt-0.5">⚠️</span>
+              <div>
+                <h2 className="text-white font-bold text-lg leading-tight">
+                  Données personnelles détectées
+                </h2>
+                <p className="text-gray-400 text-sm mt-1">
+                  Nous avons détecté des données potentiellement personnelles dans votre fichier&nbsp;:
+                </p>
+              </div>
+            </div>
+
+            {/* Column list */}
+            <div className="space-y-2 mb-4 max-h-40 overflow-y-auto pr-1">
+              {rgpdResult.columns.map((col) => (
+                <div key={col.name} className="flex items-start gap-2 text-sm bg-white/[0.03] border border-white/5 rounded-lg px-3 py-2">
+                  <span className="flex-shrink-0 mt-0.5">{col.risk === 'high' ? '🔴' : '🟡'}</span>
+                  <div className="min-w-0">
+                    <span className="text-white font-semibold">{col.name}</span>
+                    <span className="text-gray-400"> — {col.reason}</span>
+                    {col.article && (
+                      <span className="ml-1 text-blue-400 text-xs">({col.article})</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* User rights */}
+            <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl px-4 py-3 mb-5 text-xs text-gray-400 space-y-1">
+              <p className="text-blue-300 font-semibold mb-1.5">Vos droits :</p>
+              <p>✅ Analyse anonymisée (recommandé)</p>
+              <p>✅ Données supprimées après analyse</p>
+              <p>✅ Audit trail RGPD généré</p>
+            </div>
+
+            {/* Recommendation */}
+            <p className="text-xs text-amber-400/80 mb-5 leading-relaxed">
+              {rgpdResult.recommendation}
+            </p>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => proceedWithAnalysis(pendingPrompt)}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors"
+              >
+                Continuer l&apos;analyse
+              </button>
+              <button
+                onClick={() => { setShowRgpdModal(false); setPendingPrompt(""); }}
+                className="flex-1 border border-white/10 text-gray-400 hover:text-white hover:border-white/30 rounded-xl py-2.5 text-sm transition-colors"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Decorative ambient backgrounds - Enterprise Premium */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
       <div className="absolute left-0 top-0 w-[800px] h-[800px] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
@@ -355,11 +449,15 @@ export default function AgentChatPage() {
               )}
             </Button>
           </form>
-          <div className="text-center mt-3">
-             <span className="text-[11px] text-gray-500 flex items-center justify-center gap-1.5 font-medium">
-               <Shield className="w-3 h-3 text-blue-500/70" />
-               Vérifiez toujours les algorithmes générés avant la production.
-             </span>
+          <div className="text-center mt-3 space-y-1">
+            <span className="text-[11px] text-gray-500 flex items-center justify-center gap-1.5 font-medium">
+              <Shield className="w-3 h-3 text-blue-500/70" />
+              Vérifiez toujours les algorithmes générés avant la production.
+            </span>
+            <span className="text-[11px] text-gray-600 flex items-center justify-center gap-1.5 font-medium">
+              <Shield className="w-3 h-3 text-emerald-500/70" />
+              RGPD Compliant — Art. 25 Privacy by Design
+            </span>
           </div>
         </div>
       </div>

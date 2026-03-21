@@ -45,10 +45,13 @@ Bilingual Support:
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from datetime import datetime, timezone
 import aiofiles
 import os
 import uuid
+import io
+import csv
 import logging
 from backend.monitoring.analytics_tracker import log_analytics_event_sync
 
@@ -579,3 +582,193 @@ async def list_files(
         })
 
     return {"files": files, "total": len(files)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RGPD Personal Data Scanner
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# High-risk: direct personal identifiers (RGPD Art. 4(1))
+_RGPD_HIGH: dict[str, str] = {
+    "email":            "Identifiant personnel — Adresse e-mail",
+    "mail":             "Identifiant personnel — Adresse e-mail",
+    "phone":            "Identifiant personnel — Numéro de téléphone",
+    "telephone":        "Identifiant personnel — Numéro de téléphone",
+    "tel":              "Identifiant personnel — Numéro de téléphone",
+    "mobile":           "Identifiant personnel — Numéro de mobile",
+    "nom":              "Identifiant personnel — Nom de famille",
+    "name":             "Identifiant personnel — Nom complet",
+    "prenom":           "Identifiant personnel — Prénom",
+    "firstname":        "Identifiant personnel — Prénom",
+    "lastname":         "Identifiant personnel — Nom de famille",
+    "surname":          "Identifiant personnel — Nom de famille",
+    "adresse":          "Identifiant personnel — Adresse postale",
+    "address":          "Identifiant personnel — Adresse postale",
+    "rue":              "Identifiant personnel — Rue",
+    "street":           "Identifiant personnel — Street address",
+    "ssn":              "Identifiant personnel — Numéro de sécurité sociale",
+    "nss":              "Identifiant personnel — Numéro de sécurité sociale",
+    "securite_sociale": "Identifiant personnel — Numéro de sécurité sociale",
+    "national_id":      "Identifiant personnel — Numéro national d'identité",
+    "passport":         "Identifiant personnel — Numéro de passeport",
+    "carte_identite":   "Identifiant personnel — Carte d'identité",
+    "cin":              "Identifiant personnel — Carte d'identité nationale",
+    "ip_address":       "Identifiant personnel — Adresse IP",
+    "ip":               "Identifiant personnel — Adresse IP",
+    "device_id":        "Identifiant personnel — Identifiant d'appareil",
+    "date_naissance":   "Identifiant personnel — Date de naissance",
+    "birthdate":        "Identifiant personnel — Date de naissance",
+    "birthday":         "Identifiant personnel — Date de naissance",
+    "dob":              "Identifiant personnel — Date of Birth",
+}
+
+# Medium-risk: quasi-identifiers (RGPD Art. 4(1) / Art. 9)
+_RGPD_MEDIUM: dict[str, tuple[str, str]] = {
+    "age":          ("Quasi-identifiant — Âge",                          "RGPD Article 4(1)"),
+    "genre":        ("Quasi-identifiant — Genre",                        "RGPD Article 4(1)"),
+    "gender":       ("Quasi-identifiant — Gender",                       "RGPD Article 4(1)"),
+    "sexe":         ("Quasi-identifiant — Sexe",                         "RGPD Article 4(1)"),
+    "sex":          ("Quasi-identifiant — Sex",                          "RGPD Article 4(1)"),
+    "ville":        ("Quasi-identifiant — Ville",                        "RGPD Article 4(1)"),
+    "city":         ("Quasi-identifiant — City",                         "RGPD Article 4(1)"),
+    "pays":         ("Quasi-identifiant — Pays",                         "RGPD Article 4(1)"),
+    "country":      ("Quasi-identifiant — Country",                      "RGPD Article 4(1)"),
+    "region":       ("Quasi-identifiant — Région",                       "RGPD Article 4(1)"),
+    "code_postal":  ("Quasi-identifiant — Code postal",                  "RGPD Article 4(1)"),
+    "zip":          ("Quasi-identifiant — ZIP code",                     "RGPD Article 4(1)"),
+    "postal":       ("Quasi-identifiant — Code postal",                  "RGPD Article 4(1)"),
+    "salaire":      ("Quasi-identifiant — Salaire (donnée financière)",  "RGPD Article 4(1)"),
+    "salary":       ("Quasi-identifiant — Salary",                       "RGPD Article 4(1)"),
+    "income":       ("Quasi-identifiant — Revenus",                      "RGPD Article 4(1)"),
+    "revenue":      ("Quasi-identifiant — Revenu",                       "RGPD Article 4(1)"),
+    "religion":     ("Donnée sensible — Religion",                       "RGPD Article 9"),
+    "ethnicity":    ("Donnée sensible — Ethnie",                         "RGPD Article 9"),
+    "race":         ("Donnée sensible — Origine raciale",                "RGPD Article 9"),
+}
+
+
+def _classify_column(col_name: str) -> tuple[str, str, str]:
+    """Classify a single column name into a RGPD risk tier.
+
+    Returns:
+        (risk_level, reason, article) — risk_level is 'high', 'medium', or 'safe'.
+    """
+    lower = col_name.lower().replace(" ", "_")
+    for kw, reason in _RGPD_HIGH.items():
+        if kw in lower:
+            return "high", reason, "RGPD Article 4(1)"
+    for kw, (reason, article) in _RGPD_MEDIUM.items():
+        if kw in lower:
+            return "medium", reason, article
+    return "safe", "Donnée statistique — Faible risque", ""
+
+
+class RgpdScanRequest(BaseModel):
+    file_id: str
+
+
+@router.post("/rgpd-scan")
+async def rgpd_scan(
+    request: RgpdScanRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Scan a CSV file's column names for RGPD personal-data indicators.
+
+    Downloads only the header row from Supabase Storage (local fallback),
+    then classifies each column:
+      - high   : direct personal identifiers — RGPD Art. 4(1)
+      - medium : quasi-identifiers / sensitive categories — Art. 4 / Art. 9
+      - safe   : statistical / anonymous data
+
+    Returns a structured risk assessment with per-column detail and recommendations.
+    """
+    file_id = request.file_id
+    user_id = str(current_user.id)
+
+    # ── 1. Fetch file bytes (Supabase first, local filesystem fallback) ──────
+    csv_bytes: bytes | None = None
+
+    if _supabase is not None:
+        try:
+            storage_path = f"{user_id}/{file_id}"
+            csv_bytes = _supabase.storage.from_("uploads").download(storage_path)
+            logger.info(f"RGPD scan: downloaded {storage_path} from Supabase")
+        except Exception as _dl_err:
+            logger.warning(f"RGPD scan: Supabase download failed: {_dl_err}")
+
+    if csv_bytes is None:
+        local_path = os.path.join(UPLOAD_DIR, user_id, file_id)
+        if not os.path.exists(local_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Fichier non trouvé: {file_id}",
+            )
+        with open(local_path, "rb") as _lf:
+            csv_bytes = _lf.read()
+
+    # ── 2. Parse header row only (lightweight — no pandas required) ──────────
+    try:
+        text = csv_bytes.decode("utf-8", errors="replace")
+        reader = csv.reader(io.StringIO(text))
+        columns = next(reader, [])
+    except Exception as _parse_err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Impossible de lire le fichier CSV: {_parse_err}",
+        )
+
+    if not columns:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Le fichier CSV ne contient aucune colonne détectable.",
+        )
+
+    # ── 3. Classify each column ──────────────────────────────────────────────
+    column_results: list[dict] = []
+    risk_column_names: list[str] = []
+    safe_columns: list[str] = []
+    has_high = False
+    has_medium = False
+
+    for col in columns:
+        risk, reason, article = _classify_column(col)
+        if risk == "high":
+            has_high = True
+            risk_column_names.append(col)
+            column_results.append({"name": col, "risk": "high", "reason": reason, "article": article})
+        elif risk == "medium":
+            has_medium = True
+            risk_column_names.append(col)
+            column_results.append({"name": col, "risk": "medium", "reason": reason, "article": article})
+        else:
+            safe_columns.append(col)
+
+    # ── 4. Aggregate risk ────────────────────────────────────────────────────
+    if has_high:
+        overall_risk = "high"
+    elif has_medium:
+        overall_risk = "medium"
+    elif risk_column_names:
+        overall_risk = "low"
+    else:
+        overall_risk = "safe"
+
+    has_personal_data = len(risk_column_names) > 0
+    recommendation = (
+        f"Supprimer ou anonymiser les colonnes : {', '.join(risk_column_names)}"
+        if risk_column_names
+        else "Aucune donnée personnelle détectée. Analyse sécurisée."
+    )
+
+    logger.info(
+        f"RGPD scan: file={file_id} user={current_user.email} "
+        f"risk={overall_risk} columns={len(columns)} personal={has_personal_data}"
+    )
+
+    return {
+        "has_personal_data": has_personal_data,
+        "risk_level": overall_risk,
+        "columns": column_results,
+        "safe_columns": safe_columns,
+        "recommendation": recommendation,
+    }

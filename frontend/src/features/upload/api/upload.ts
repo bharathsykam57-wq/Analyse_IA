@@ -40,3 +40,25 @@ export const fetchFiles = async (): Promise<UploadedFile[]> => {
   // Backend returns { files: [...], total: n }, extract the files array
   return Array.isArray(response.data) ? response.data : (response.data.files || []);
 };
+
+// ── RGPD Scanner ──────────────────────────────────────────────────────────────
+
+export interface RgpdColumnResult {
+  name: string;
+  risk: "high" | "medium" | "safe";
+  reason: string;
+  article: string;
+}
+
+export interface RgpdScanResult {
+  has_personal_data: boolean;
+  risk_level: "high" | "medium" | "low" | "safe";
+  columns: RgpdColumnResult[];
+  safe_columns: string[];
+  recommendation: string;
+}
+
+export const rgpdScan = async (file_id: string): Promise<RgpdScanResult> => {
+  const response = await apiClient.post("files/rgpd-scan", { file_id });
+  return response.data;
+};
